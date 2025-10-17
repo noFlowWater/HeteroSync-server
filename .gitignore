@@ -1,0 +1,79 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+*.coverage
+
+# Go workspace file
+go.work
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+time-sync.db
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+time-sync-server
+server
+/bin/
+/build/
+/cmd/server/server
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Debug files
+__debug_bin
+debug
+
+# Profiling data
+*.prof
+*.pprof
+
+# Air live reload (if using)
+.air.toml
+
+# Dependency directories (optional)
+vendor/
+
+# CI/CD artifacts
+.github/workflows/*.log
+
+# Claude AI files
+*.claude.json
+.claude/
