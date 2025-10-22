@@ -62,6 +62,10 @@ func (s *SyncService) RequestTimeSync(pairingID string) (*models.TimeSyncRecord,
 }
 
 // Sync History
+func (s *SyncService) GetSyncRecord(id int64) (*models.TimeSyncRecord, error) {
+	return s.repo.GetTimeSyncRecord(id)
+}
+
 func (s *SyncService) GetSyncRecords(limit, offset int) ([]*models.TimeSyncRecord, error) {
 	if limit <= 0 {
 		limit = 50
@@ -190,6 +194,28 @@ func (s *SyncService) GetAggregatedSyncResults(pairingID string, limit, offset i
 		limit = 1000
 	}
 	return s.repo.GetAggregatedSyncResultsByPairing(pairingID, limit, offset)
+}
+
+// GetAllAggregatedSyncResults retrieves all aggregated sync results
+func (s *SyncService) GetAllAggregatedSyncResults(limit, offset int) ([]*models.AggregatedSyncResult, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	return s.repo.GetAllAggregatedSyncResults(limit, offset)
+}
+
+// GetAggregatedSyncResultsByTimeRange retrieves aggregated sync results within a time range
+func (s *SyncService) GetAggregatedSyncResultsByTimeRange(startTime, endTime time.Time, limit, offset int) ([]*models.AggregatedSyncResult, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	return s.repo.GetAggregatedSyncResultsByTimeRange(startTime, endTime, limit, offset)
 }
 
 // Helper function to get value or zero for nullable int64 pointers

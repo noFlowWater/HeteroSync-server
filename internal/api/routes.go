@@ -22,6 +22,15 @@ func SetupRoutes(r *gin.Engine, handler *Handler) {
 			// GET /api/devices
 			// Output: [{"id": "psg-001", "type": "PSG", "status": "online"}, {"id": "watch-001", "type": "Watch", "status": "offline"}]
 			devices.GET("", handler.GetDevices)
+
+			// GET /api/devices/health
+			// Get connection health status for all devices or specific device
+			// Query params: deviceId (optional)
+			// Examples:
+			//   - GET /api/devices/health (all devices)
+			//   - GET /api/devices/health?deviceId=psg-001 (specific device)
+			// Output: {"deviceId": "psg-001", "isHealthy": true, "lastRtt": 15, "timeSinceLastPong": 5000, ...}
+			devices.GET("/health", handler.GetDeviceHealth)
 		}
 
 		// Pairing management
@@ -62,9 +71,22 @@ func SetupRoutes(r *gin.Engine, handler *Handler) {
 			// Output: [{"id": 1, "device1_id": "psg-001", "time_difference": -150, ...}]
 			sync.GET("/records", handler.GetSyncRecords)
 
+			// GET /api/sync/records/:recordId
+			// Get a single sync record by ID
+			// Example: GET /api/sync/records/123
+			// Output: {"id": 123, "device1_id": "psg-001", "time_difference": -150, ...}
+			sync.GET("/records/:recordId", handler.GetSyncRecord)
+
 			// GET /api/sync/aggregated
-			// Get aggregated NTP results by pairing
-			// Query params: pairingId (required), limit, offset
+			// Get aggregated NTP results with optional filters
+			// Query params:
+			//   - pairingId (optional): Filter by specific pairing
+			//   - startTime, endTime (optional): Filter by time range (RFC3339 format)
+			//   - limit, offset: Pagination
+			// Examples:
+			//   - GET /api/sync/aggregated?pairingId=pair-123&limit=10
+			//   - GET /api/sync/aggregated?startTime=2024-01-01T00:00:00Z&endTime=2024-01-31T23:59:59Z
+			//   - GET /api/sync/aggregated (all results)
 			// Output: [{"aggregation_id": "agg-123", "best_offset": -150, "confidence": 0.94, ...}]
 			sync.GET("/aggregated", handler.GetAggregatedResults)
 

@@ -5,8 +5,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"time-sync-server/internal/models"
+
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -19,25 +20,37 @@ const (
 	// Send pings to peer with this period (must be less than pongWait)
 	pingPeriod = (pongWait * 9) / 10
 
+	// Application-level PING period (20 seconds as recommended)
+	appPingPeriod = 20 * time.Second
+
 	// Maximum message size allowed from peer
-	maxMessageSize = 512
+	maxMessageSize = 512 // Increased to 8KB to handle longer JSON messages
 )
 
 type Client struct {
-	Hub        *Hub
-	Conn       *websocket.Conn
-	Send       chan []byte
-	DeviceID   string
-	DeviceType models.DeviceType
+	Hub          *Hub
+	Conn         *websocket.Conn
+	Send         chan []byte
+	DeviceID     string
+	DeviceType   models.DeviceType
+	ConnectedAt  time.Time // Connection establishment time
+	LastPingSent time.Time // Last application-level PING sent time
+	LastPongRecv time.Time // Last application-level PONG received time
+	LastRTT      int64     // Last measured RTT in milliseconds
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, deviceID string, deviceType models.DeviceType) *Client {
+	now := time.Now()
 	return &Client{
-		Hub:        hub,
-		Conn:       conn,
-		Send:       make(chan []byte, 256),
-		DeviceID:   deviceID,
-		DeviceType: deviceType,
+		Hub:          hub,
+		Conn:         conn,
+		Send:         make(chan []byte, 256),
+		DeviceID:     deviceID,
+		DeviceType:   deviceType,
+		ConnectedAt:  now,
+		LastPingSent: now,
+		LastPongRecv: now,
+		LastRTT:      0,
 	}
 }
 
@@ -71,9 +84,11 @@ func (c *Client) ReadPump() {
 
 // writePump pumps messages from the hub to the websocket connection
 func (c *Client) WritePump() {
-	ticker := time.NewTicker(pingPeriod)
+	protocolPingTicker := time.NewTicker(pingPeriod)
+	appPingTicker := time.NewTicker(appPingPeriod)
 	defer func() {
-		ticker.Stop()
+		protocolPingTicker.Stop()
+		appPingTicker.Stop()
 		c.Conn.Close()
 	}()
 
@@ -104,11 +119,16 @@ func (c *Client) WritePump() {
 				return
 			}
 
-		case <-ticker.C:
+		case <-protocolPingTicker.C:
+			// WebSocket protocol-level ping
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+
+		case <-appPingTicker.C:
+			// Application-level PING message
+			c.sendAppPing()
 		}
 	}
 }
@@ -125,5 +145,19 @@ func (c *Client) SendMessage(msg interface{}) error {
 		return nil
 	default:
 		return websocket.ErrCloseSent
+	}
+}
+
+// sendAppPing sends an application-level PING message to the client
+func (c *Client) sendAppPing() {
+	c.LastPingSent = time.Now()
+	pingMsg := models.PingMessage{
+		Type:      models.MessageTypePing,
+		Timestamp: c.LastPingSent.UnixMilli(),
+	}
+
+	if err := c.SendMessage(pingMsg); err != nil {
+		log.Printf("Failed to send PING to device %s: %v", c.DeviceID, err)
+		// 에러는 중요하므로 유지
 	}
 }

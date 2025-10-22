@@ -79,6 +79,24 @@ func (h *Handler) GetDevices(c *gin.Context) {
 	c.JSON(http.StatusOK, devices)
 }
 
+func (h *Handler) GetDeviceHealth(c *gin.Context) {
+	deviceID := c.Query("deviceId")
+
+	if deviceID != "" {
+		// Get health for specific device
+		health, err := h.hub.GetDeviceHealthByID(deviceID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, health)
+	} else {
+		// Get health for all devices
+		healthList := h.hub.GetDeviceHealth()
+		c.JSON(http.StatusOK, healthList)
+	}
+}
+
 // Pairing Handlers
 func (h *Handler) GetPairings(c *gin.Context) {
 	pairings := h.syncService.GetPairings()
@@ -131,6 +149,24 @@ func (h *Handler) RequestSync(c *gin.Context) {
 		Success: true,
 		Record:  record,
 	})
+}
+
+func (h *Handler) GetSyncRecord(c *gin.Context) {
+	recordIDStr := c.Param("recordId")
+
+	recordID, err := strconv.ParseInt(recordIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid record ID"})
+		return
+	}
+
+	record, err := h.syncService.GetSyncRecord(recordID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, record)
 }
 
 func (h *Handler) GetSyncRecords(c *gin.Context) {
@@ -206,8 +242,11 @@ func (h *Handler) RequestMultiSync(c *gin.Context) {
 }
 
 // GetAggregatedResults retrieves aggregated sync results
+// Supports filtering by pairingId or time range (startTime, endTime)
 func (h *Handler) GetAggregatedResults(c *gin.Context) {
 	pairingID := c.Query("pairingId")
+	startTimeStr := c.Query("startTime")
+	endTimeStr := c.Query("endTime")
 	limitStr := c.DefaultQuery("limit", "50")
 	offsetStr := c.DefaultQuery("offset", "0")
 
@@ -223,12 +262,27 @@ func (h *Handler) GetAggregatedResults(c *gin.Context) {
 		return
 	}
 
-	if pairingID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pairingId is required"})
-		return
+	var results []*models.AggregatedSyncResult
+
+	// Filter by pairing ID if provided
+	if pairingID != "" {
+		results, err = h.syncService.GetAggregatedSyncResults(pairingID, limit, offset)
+	} else if startTimeStr != "" && endTimeStr != "" {
+		// Filter by time range if provided
+		startTime, err1 := time.Parse(time.RFC3339, startTimeStr)
+		endTime, err2 := time.Parse(time.RFC3339, endTimeStr)
+
+		if err1 != nil || err2 != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid time format, use RFC3339"})
+			return
+		}
+
+		results, err = h.syncService.GetAggregatedSyncResultsByTimeRange(startTime, endTime, limit, offset)
+	} else {
+		// Get all results if no filter is provided
+		results, err = h.syncService.GetAllAggregatedSyncResults(limit, offset)
 	}
 
-	results, err := h.syncService.GetAggregatedSyncResults(pairingID, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

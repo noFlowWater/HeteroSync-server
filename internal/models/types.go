@@ -27,6 +27,18 @@ type Device struct {
 	ConnectedAt time.Time  `json:"connectedAt"`
 }
 
+// DeviceHealth represents the health status of a connected device
+type DeviceHealth struct {
+	DeviceID       string     `json:"deviceId"`
+	DeviceType     DeviceType `json:"deviceType"`
+	ConnectedAt    time.Time  `json:"connectedAt"`
+	LastPingSent   time.Time  `json:"lastPingSent"`
+	LastPongRecv   time.Time  `json:"lastPongRecv"`
+	LastRTT        int64      `json:"lastRtt"`        // milliseconds
+	IsHealthy      bool       `json:"isHealthy"`      // true if PONG received within threshold
+	TimeSinceLastPong int64   `json:"timeSinceLastPong"` // milliseconds
+}
+
 // Pairing represents a pairing between two devices
 type Pairing struct {
 	PairingID string    `json:"pairingId"`
@@ -65,6 +77,8 @@ const (
 	MessageTypeTimeRequest  MessageType = "TIME_REQUEST"
 	MessageTypeTimeResponse MessageType = "TIME_RESPONSE"
 	MessageTypeError        MessageType = "ERROR"
+	MessageTypePing         MessageType = "PING"
+	MessageTypePong         MessageType = "PONG"
 )
 
 // WebSocket Messages
@@ -94,6 +108,16 @@ type ErrorMessage struct {
 	Type    MessageType `json:"type"`
 	Code    string      `json:"code"`
 	Message string      `json:"message"`
+}
+
+type PingMessage struct {
+	Type      MessageType `json:"type"`
+	Timestamp int64       `json:"timestamp"`
+}
+
+type PongMessage struct {
+	Type      MessageType `json:"type"`
+	Timestamp int64       `json:"timestamp"`
 }
 
 // NTP Multi-Sampling Models

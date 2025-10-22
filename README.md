@@ -5,6 +5,7 @@
 ## 기능
 
 - **WebSocket 연결 관리**: PSG PC와 갤럭시 워치가 WebSocket으로 서버에 연결
+- **PING/PONG 연결 모니터링**: 자동 연결 상태 확인 및 죽은 연결 감지
 - **디바이스 페어링**: 연결된 디바이스들을 페어링하여 시간 동기화 준비
 - **시간 동기화**: 페어링된 두 디바이스에게 현재 시스템 시간을 요청하고 기록
 - **NTP 다중 샘플링**: NTP 알고리즘 기반 정밀 시간 동기화 (8-10회 측정 후 최적값 선택)
@@ -117,6 +118,100 @@ GET /api/devices
     "connectedAt": "2025-10-02T14:31:00Z"
   }
 ]
+```
+
+#### 2-1. 디바이스 연결 건강도 조회
+
+WebSocket 연결의 건강 상태를 모니터링할 수 있는 API입니다. PING/PONG 프로토콜을 통해 실시간으로 연결 상태를 추적합니다.
+
+```bash
+# 모든 디바이스의 건강도 조회
+GET /api/devices/health
+
+# 특정 디바이스의 건강도 조회
+GET /api/devices/health?deviceId=psg-001
+```
+
+**응답 예시 (전체 조회):**
+```json
+[
+  {
+    "deviceId": "psg-001",
+    "deviceType": "PSG",
+    "connectedAt": "2025-10-18T14:30:00Z",
+    "lastPingSent": "2025-10-18T14:35:20Z",
+    "lastPongRecv": "2025-10-18T14:35:20Z",
+    "lastRtt": 15,
+    "isHealthy": true,
+    "timeSinceLastPong": 5000
+  },
+  {
+    "deviceId": "watch-001",
+    "deviceType": "WATCH",
+    "connectedAt": "2025-10-18T14:31:00Z",
+    "lastPingSent": "2025-10-18T14:35:18Z",
+    "lastPongRecv": "2025-10-18T14:35:18Z",
+    "lastRtt": 25,
+    "isHealthy": true,
+    "timeSinceLastPong": 7000
+  }
+]
+```
+
+**응답 예시 (특정 디바이스 조회):**
+```json
+{
+  "deviceId": "psg-001",
+  "deviceType": "PSG",
+  "connectedAt": "2025-10-18T14:30:00Z",
+  "lastPingSent": "2025-10-18T14:35:20Z",
+  "lastPongRecv": "2025-10-18T14:35:20Z",
+  "lastRtt": 15,
+  "isHealthy": true,
+  "timeSinceLastPong": 5000
+}
+```
+
+**응답 필드 설명:**
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `deviceId` | string | 디바이스 ID |
+| `deviceType` | string | 디바이스 타입 (PSG, WATCH, MOBILE) |
+| `connectedAt` | timestamp | WebSocket 연결 시작 시간 (RFC3339) |
+| `lastPingSent` | timestamp | 서버가 마지막으로 PING을 전송한 시간 |
+| `lastPongRecv` | timestamp | 서버가 마지막으로 PONG을 수신한 시간 |
+| `lastRtt` | int64 | 마지막 측정된 RTT (밀리초) |
+| `isHealthy` | boolean | 연결 건강 상태 |
+| `timeSinceLastPong` | int64 | 마지막 PONG 이후 경과 시간 (밀리초) |
+
+**건강 상태 판정 기준:**
+- `isHealthy: true` - 마지막 PONG 수신 후 **90초 이내**
+- `isHealthy: false` - 마지막 PONG 수신 후 **90초 초과**
+- **자동 연결 해제** - 마지막 PONG 수신 후 **120초 초과** (서버가 자동으로 연결 종료)
+
+**사용 사례:**
+```bash
+# 주기적으로 연결 상태 확인 (모니터링 대시보드)
+while true; do
+  curl http://localhost:8080/api/devices/health | jq
+  sleep 10
+done
+
+# 특정 디바이스가 건강한지 확인
+curl "http://localhost:8080/api/devices/health?deviceId=psg-001" | jq '.isHealthy'
+# 출력: true
+
+# 비건강 디바이스 필터링 (jq 사용)
+curl http://localhost:8080/api/devices/health | jq '.[] | select(.isHealthy == false)'
+```
+
+**에러 응답:**
+```json
+// 404 Not Found - 디바이스가 연결되지 않음
+{
+  "error": "device not connected: psg-001"
+}
 ```
 
 #### 3. 페어링 생성
@@ -238,11 +333,47 @@ Content-Type: application/json
 
 #### 8. 집계 결과 조회
 ```bash
+# 전체 집계 결과 조회 (모든 페어링)
+GET /api/sync/aggregated?limit=50&offset=0
+
 # 특정 페어링의 NTP 결과 조회
 GET /api/sync/aggregated?pairingId=550e8400-e29b-41d4-a716-446655440000&limit=50&offset=0
 
+# 시간 범위로 집계 결과 조회 (RFC3339 형식)
+GET /api/sync/aggregated?startTime=2025-10-01T00:00:00Z&endTime=2025-10-02T23:59:59Z&limit=50&offset=0
+
 # 특정 집계 결과 상세 조회 (모든 개별 측정 포함)
 GET /api/sync/aggregated/{aggregationId}
+```
+
+**쿼리 파라미터:**
+- `pairingId` (선택): 특정 페어링으로 필터링
+- `startTime`, `endTime` (선택): 시간 범위로 필터링 (RFC3339 형식)
+- `limit` (선택): 조회할 결과 수 (기본값: 50, 최대: 1000)
+- `offset` (선택): 페이지네이션 오프셋 (기본값: 0)
+
+**응답 예시:**
+```json
+[
+  {
+    "aggregation_id": "agg-uuid-1",
+    "pairing_id": "550e8400-e29b-41d4-a716-446655440000",
+    "best_offset": -150,
+    "median_offset": -150,
+    "mean_offset": -151.2,
+    "confidence": 0.94,
+    "created_at": 1727870401000
+  },
+  {
+    "aggregation_id": "agg-uuid-2",
+    "pairing_id": "550e8400-e29b-41d4-a716-446655440001",
+    "best_offset": -182,
+    "median_offset": -180,
+    "mean_offset": -181.5,
+    "confidence": 0.92,
+    "created_at": 1727899201000
+  }
+]
 ```
 
 #### 9. 동기화 이력 조회
@@ -255,6 +386,29 @@ GET /api/sync/records?deviceId=psg-001&limit=50&offset=0
 
 # 시간 범위로 조회
 GET /api/sync/records?startTime=2025-10-01T00:00:00Z&endTime=2025-10-02T23:59:59Z&limit=50&offset=0
+
+# 특정 record 상세 조회
+GET /api/sync/records/{recordId}
+```
+
+**응답 예시 (상세 조회):**
+```json
+{
+  "id": 123,
+  "device1Id": "psg-001",
+  "device1Type": "PSG",
+  "device1Timestamp": 1727870400123,
+  "device2Id": "watch-001",
+  "device2Type": "WATCH",
+  "device2Timestamp": 1727870400456,
+  "serverRequestTime": 1727870400000,
+  "serverResponseTime": 1727870401000,
+  "device1Rtt": 5000,
+  "device2Rtt": 8000,
+  "timeDifference": -333,
+  "status": "SUCCESS",
+  "createdAt": 1727870401000
+}
 ```
 
 ### WebSocket 연결
@@ -292,6 +446,230 @@ ws://localhost:8080/ws?deviceType=WATCH&deviceId=watch-001
   "requestId": "req-uuid-xxx",
   "timestamp": 1727870400123
 }
+```
+
+**서버 → 클라이언트: PING (연결 유지)**
+```json
+{
+  "type": "PING",
+  "timestamp": 1727870400000
+}
+```
+
+**클라이언트 → 서버: PONG (연결 확인)**
+```json
+{
+  "type": "PONG",
+  "timestamp": 1727870400015
+}
+```
+
+#### PING/PONG 연결 모니터링 프로토콜
+
+서버는 **이중 PING 시스템**을 사용하여 WebSocket 연결 상태를 지속적으로 모니터링합니다.
+
+##### 1️⃣ WebSocket 프로토콜 레벨 PING (네트워크 계층)
+
+WebSocket 표준 프레임을 사용한 낮은 레벨의 연결 유지:
+
+| 속성 | 값 |
+|------|-----|
+| **전송 주기** | 54초마다 |
+| **프레임 타입** | WebSocket Ping Frame (opcode 0x9) |
+| **처리 방식** | 브라우저/라이브러리가 자동으로 Pong 응답 |
+| **타임아웃** | 60초 (Pong 미수신 시 연결 종료) |
+| **목적** | 네트워크 계층 연결 유지, NAT/방화벽 세션 타임아웃 방지 |
+
+**클라이언트 측 처리:**
+- 대부분의 WebSocket 라이브러리에서 자동 처리
+- 별도 구현 불필요 (브라우저/OS 레벨에서 자동 응답)
+
+##### 2️⃣ 애플리케이션 레벨 PING/PONG (JSON 메시지)
+
+애플리케이션 계층에서 명시적으로 연결 상태를 확인하고 RTT를 측정:
+
+| 속성 | 값 |
+|------|-----|
+| **전송 주기** | 20초마다 |
+| **메시지 형식** | JSON (`{"type": "PING", "timestamp": ...}`) |
+| **처리 방식** | 클라이언트가 명시적으로 PONG 응답 필요 |
+| **RTT 측정** | PING 전송 ~ PONG 수신 시간 차이 |
+| **목적** | 연결 건강도 확인, RTT 측정, 애플리케이션 응답성 검증 |
+
+**타임라인 예시:**
+```
+T=0s    : WebSocket 연결 수립
+T=20s   : 서버 → PING (App-level)
+T=20.015s: 클라이언트 → PONG (RTT: 15ms)
+T=40s   : 서버 → PING
+T=54s   : 서버 → Ping (Protocol-level)
+T=54.002s: 클라이언트 → Pong (자동)
+T=60s   : 서버 → PING (App-level)
+...
+```
+
+##### 연결 상태 판정 기준
+
+| 상태 | 조건 | 설명 |
+|------|------|------|
+| 🟢 **Healthy** | Last PONG < 90초 전 | 정상 연결, `isHealthy: true` |
+| 🟡 **Unhealthy** | Last PONG > 90초 전 | 응답 지연, `isHealthy: false` |
+| 🔴 **Dead** | Last PONG > 120초 전 | 자동 연결 해제 (30초마다 체크) |
+
+**상태 전이:**
+```
+[연결 수립] → [Healthy]
+              ↓ (90초 PONG 없음)
+           [Unhealthy]
+              ↓ (120초 PONG 없음)
+           [Dead] → [연결 해제]
+```
+
+##### 클라이언트 구현 가이드
+
+**필수 구현: PING에 대한 PONG 응답**
+
+```javascript
+const websocket = new WebSocket('ws://localhost:8080/ws?deviceId=psg-001&deviceType=PSG');
+
+websocket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  switch (message.type) {
+    case 'PING':
+      // ⚠️ 필수: PING 수신 시 즉시 PONG 응답
+      websocket.send(JSON.stringify({
+        type: 'PONG',
+        timestamp: Date.now()
+      }));
+      console.log('Sent PONG response');
+      break;
+
+    case 'CONNECTED':
+      console.log('Connected to server:', message);
+      break;
+
+    case 'TIME_REQUEST':
+      // 시간 동기화 요청 처리
+      handleTimeRequest(message);
+      break;
+  }
+};
+
+websocket.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+websocket.onclose = (event) => {
+  console.log('WebSocket closed:', event.code, event.reason);
+  // 120초 타임아웃으로 닫힌 경우: code 1006 (Abnormal Closure)
+};
+```
+
+**권장 구현: 연결 건강도 모니터링**
+
+```javascript
+class HealthMonitor {
+  constructor(websocket) {
+    this.ws = websocket;
+    this.lastPingReceived = Date.now();
+    this.lastPongSent = Date.now();
+
+    // 1분마다 건강도 체크
+    setInterval(() => this.checkHealth(), 60000);
+  }
+
+  onPingReceived() {
+    this.lastPingReceived = Date.now();
+
+    // PONG 즉시 전송
+    this.ws.send(JSON.stringify({
+      type: 'PONG',
+      timestamp: Date.now()
+    }));
+    this.lastPongSent = Date.now();
+  }
+
+  checkHealth() {
+    const timeSinceLastPing = Date.now() - this.lastPingReceived;
+
+    if (timeSinceLastPing > 90000) {
+      console.warn('⚠️ Connection unhealthy: No PING for', timeSinceLastPing, 'ms');
+      // 재연결 로직 실행 가능
+    } else {
+      console.log('✅ Connection healthy');
+    }
+  }
+
+  async queryServerHealth() {
+    // REST API로 서버 측 건강도 확인
+    const response = await fetch('http://localhost:8080/api/devices/health?deviceId=psg-001');
+    const health = await response.json();
+    console.log('Server-side health:', health);
+    return health;
+  }
+}
+
+// 사용 예시
+const monitor = new HealthMonitor(websocket);
+
+websocket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === 'PING') {
+    monitor.onPingReceived();
+  }
+};
+```
+
+##### 연결 유지 모범 사례
+
+**✅ DO (권장):**
+- PING 수신 즉시 PONG 응답 (지연 최소화)
+- 주기적으로 REST API로 연결 건강도 확인 (`/api/devices/health`)
+- 120초 타임아웃 전에 재연결 로직 준비
+- `onclose` 이벤트에서 자동 재연결 구현
+
+**❌ DON'T (비권장):**
+- PONG 응답 지연 (블로킹 작업 중 PING 무시)
+- 프로토콜 레벨 PING만 의존 (애플리케이션 레벨 무시)
+- 타임아웃 후 무한 재연결 시도 (백오프 전략 사용)
+
+##### 디버깅 및 모니터링
+
+**서버 로그 확인:**
+```bash
+# PING/PONG 관련 로그
+tail -f server.log | grep -E "PING|PONG|Dead connection"
+
+# 출력 예시:
+# 2025/10/18 14:35:20 Received PONG from client psg-001, RTT: 15ms
+# 2025/10/18 14:37:45 Dead connection detected: watch-001 (no PONG for 125s)
+```
+
+**REST API로 실시간 모니터링:**
+```bash
+# 실시간 건강도 모니터링 스크립트
+watch -n 5 'curl -s http://localhost:8080/api/devices/health | jq'
+
+# 또는 특정 디바이스만
+watch -n 5 'curl -s "http://localhost:8080/api/devices/health?deviceId=psg-001" | jq'
+```
+
+**연결 해제 원인 분석:**
+```javascript
+websocket.onclose = (event) => {
+  switch (event.code) {
+    case 1000:
+      console.log('Normal closure');
+      break;
+    case 1006:
+      console.log('Abnormal closure - possibly 120s timeout');
+      break;
+    default:
+      console.log('Connection closed:', event.code, event.reason);
+  }
+};
 ```
 
 ## NTP 다중 샘플링 알고리즘

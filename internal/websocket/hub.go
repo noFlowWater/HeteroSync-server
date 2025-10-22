@@ -57,6 +57,9 @@ func NewHub() *Hub {
 }
 
 func (h *Hub) Run() {
+	// Start dead connection detector
+	go h.detectDeadConnections()
+
 	for {
 		select {
 		case client := <-h.Register:
@@ -93,6 +96,39 @@ func (h *Hub) Run() {
 	}
 }
 
+// detectDeadConnections periodically checks for and closes dead connections
+func (h *Hub) detectDeadConnections() {
+	// Check interval: every 30 seconds
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Timeout threshold: no PONG for 120 seconds
+	const deadConnectionTimeout = 120 * time.Second
+
+	for range ticker.C {
+		h.mu.Lock()
+		now := time.Now()
+		deadClients := make([]*Client, 0)
+
+		for _, client := range h.Clients {
+			timeSinceLastPong := now.Sub(client.LastPongRecv)
+			if timeSinceLastPong > deadConnectionTimeout {
+				log.Printf("Dead connection detected: %s (no PONG for %v)",
+					client.DeviceID, timeSinceLastPong)
+				deadClients = append(deadClients, client)
+			}
+		}
+		h.mu.Unlock()
+
+		// Unregister dead clients
+		for _, client := range deadClients {
+			// Close the connection
+			client.Conn.Close()
+			// This will trigger the client's ReadPump to exit and send Unregister
+		}
+	}
+}
+
 func (h *Hub) GetConnectedDevices() []*models.Device {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -100,12 +136,67 @@ func (h *Hub) GetConnectedDevices() []*models.Device {
 	devices := make([]*models.Device, 0, len(h.Clients))
 	for _, client := range h.Clients {
 		devices = append(devices, &models.Device{
-			DeviceID:   client.DeviceID,
-			DeviceType: client.DeviceType,
-			ConnectedAt: time.Now(), // We don't track connection time, so use current time
+			DeviceID:    client.DeviceID,
+			DeviceType:  client.DeviceType,
+			ConnectedAt: client.ConnectedAt,
 		})
 	}
 	return devices
+}
+
+// GetDeviceHealth retrieves health information for all connected devices
+func (h *Hub) GetDeviceHealth() []*models.DeviceHealth {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	const healthThreshold = 90 * time.Second // Consider unhealthy if no PONG for 90 seconds
+
+	healthList := make([]*models.DeviceHealth, 0, len(h.Clients))
+	now := time.Now()
+
+	for _, client := range h.Clients {
+		timeSinceLastPong := now.Sub(client.LastPongRecv).Milliseconds()
+		isHealthy := now.Sub(client.LastPongRecv) < healthThreshold
+
+		healthList = append(healthList, &models.DeviceHealth{
+			DeviceID:          client.DeviceID,
+			DeviceType:        client.DeviceType,
+			ConnectedAt:       client.ConnectedAt,
+			LastPingSent:      client.LastPingSent,
+			LastPongRecv:      client.LastPongRecv,
+			LastRTT:           client.LastRTT,
+			IsHealthy:         isHealthy,
+			TimeSinceLastPong: timeSinceLastPong,
+		})
+	}
+	return healthList
+}
+
+// GetDeviceHealthByID retrieves health information for a specific device
+func (h *Hub) GetDeviceHealthByID(deviceID string) (*models.DeviceHealth, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	client, ok := h.Clients[deviceID]
+	if !ok {
+		return nil, &DeviceNotConnectedError{DeviceID: deviceID}
+	}
+
+	const healthThreshold = 90 * time.Second
+	now := time.Now()
+	timeSinceLastPong := now.Sub(client.LastPongRecv).Milliseconds()
+	isHealthy := now.Sub(client.LastPongRecv) < healthThreshold
+
+	return &models.DeviceHealth{
+		DeviceID:          client.DeviceID,
+		DeviceType:        client.DeviceType,
+		ConnectedAt:       client.ConnectedAt,
+		LastPingSent:      client.LastPingSent,
+		LastPongRecv:      client.LastPongRecv,
+		LastRTT:           client.LastRTT,
+		IsHealthy:         isHealthy,
+		TimeSinceLastPong: timeSinceLastPong,
+	}, nil
 }
 
 func (h *Hub) GetPairings() []*models.Pairing {
@@ -240,11 +331,16 @@ func (h *Hub) RequestTimeSync(pairingID string, timeout time.Duration) (*models.
 }
 
 func (h *Hub) HandleMessage(client *Client, message []byte) {
+	// Debug: Log the raw message
+	log.Printf("Received raw message from %s: %s", client.DeviceID, string(message))
+	
 	var baseMsg models.WSMessage
 	if err := json.Unmarshal(message, &baseMsg); err != nil {
-		log.Printf("Failed to unmarshal message: %v", err)
+		log.Printf("Failed to unmarshal message from %s: %v, raw: %s", client.DeviceID, err, string(message))
 		return
 	}
+
+	log.Printf("Parsed message type from %s: %s", client.DeviceID, baseMsg.Type)
 
 	switch baseMsg.Type {
 	case models.MessageTypeTimeResponse:
@@ -255,8 +351,24 @@ func (h *Hub) HandleMessage(client *Client, message []byte) {
 		}
 		h.handleTimeResponse(client, &timeResp)
 
+	case models.MessageTypePing:
+		var pingMsg models.PingMessage
+		if err := json.Unmarshal(message, &pingMsg); err != nil {
+			log.Printf("Failed to unmarshal PING message: %v", err)
+			return
+		}
+		h.handlePing(client, &pingMsg)
+
+	case models.MessageTypePong:
+		var pongMsg models.PongMessage
+		if err := json.Unmarshal(message, &pongMsg); err != nil {
+			log.Printf("Failed to unmarshal PONG message: %v", err)
+			return
+		}
+		h.handlePong(client, &pongMsg)
+
 	default:
-		log.Printf("Unknown message type: %s", baseMsg.Type)
+		log.Printf("Unknown message type: '%s' from client %s", baseMsg.Type, client.DeviceID)
 	}
 }
 
@@ -383,6 +495,36 @@ func (h *Hub) completeSyncRequest(pendingReq *PendingRequest) {
 
 	// Clean up
 	delete(h.PendingRequests, pendingReq.RequestID)
+}
+
+// handlePing handles incoming PING messages from clients and responds with PONG
+func (h *Hub) handlePing(client *Client, ping *models.PingMessage) {
+	// log.Printf("Received PING from client %s at %d", client.DeviceID, ping.Timestamp)
+
+	// Send PONG response
+	pongMsg := models.PongMessage{
+		Type:      models.MessageTypePong,
+		Timestamp: time.Now().UnixMilli(),
+	}
+
+	if err := client.SendMessage(pongMsg); err != nil {
+		log.Printf("Failed to send PONG to device %s: %v", client.DeviceID, err)
+	}
+}
+
+// handlePong handles incoming PONG messages from clients
+func (h *Hub) handlePong(client *Client, pong *models.PongMessage) {
+	now := time.Now()
+	client.LastPongRecv = now
+
+	// Calculate RTT if we have a recent ping
+	var rtt int64
+	if !client.LastPingSent.IsZero() {
+		rtt = now.Sub(client.LastPingSent).Milliseconds()
+		client.LastRTT = rtt
+	}
+
+	// log.Printf("Received PONG from client %s, RTT: %dms", client.DeviceID, rtt)
 }
 
 // Custom errors

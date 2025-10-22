@@ -132,6 +132,47 @@ func (r *SQLiteRepository) SaveTimeSyncRecord(record *models.TimeSyncRecord) err
 	return nil
 }
 
+// GetTimeSyncRecord retrieves a single time sync record by ID
+func (r *SQLiteRepository) GetTimeSyncRecord(id int64) (*models.TimeSyncRecord, error) {
+	query := `
+	SELECT id, device1_id, device1_type, device1_timestamp,
+	       device2_id, device2_type, device2_timestamp,
+	       server_request_time, server_response_time,
+	       device1_rtt, device2_rtt, time_difference,
+	       status, error_message, created_at
+	FROM time_sync_records
+	WHERE id = ?
+	`
+
+	record := &models.TimeSyncRecord{}
+	err := r.db.QueryRow(query, id).Scan(
+		&record.ID,
+		&record.Device1ID,
+		&record.Device1Type,
+		&record.Device1Timestamp,
+		&record.Device2ID,
+		&record.Device2Type,
+		&record.Device2Timestamp,
+		&record.ServerRequestTime,
+		&record.ServerResponseTime,
+		&record.Device1RTT,
+		&record.Device2RTT,
+		&record.TimeDifference,
+		&record.Status,
+		&record.ErrorMessage,
+		&record.CreatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("sync record not found: %d", id)
+		}
+		return nil, fmt.Errorf("failed to query sync record: %w", err)
+	}
+
+	return record, nil
+}
+
 func (r *SQLiteRepository) GetTimeSyncRecords(limit, offset int) ([]*models.TimeSyncRecord, error) {
 	query := `
 	SELECT id, device1_id, device1_type, device1_timestamp,
@@ -393,6 +434,102 @@ func (r *SQLiteRepository) GetAggregatedSyncResultsByPairing(pairingID string, l
 	rows, err := r.db.Query(query, pairingID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query aggregated results: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*models.AggregatedSyncResult
+	for rows.Next() {
+		result := &models.AggregatedSyncResult{}
+		err := rows.Scan(
+			&result.AggregationID,
+			&result.PairingID,
+			&result.BestOffset,
+			&result.MedianOffset,
+			&result.MeanOffset,
+			&result.OffsetStdDev,
+			&result.MinRTT,
+			&result.MaxRTT,
+			&result.MeanRTT,
+			&result.Confidence,
+			&result.Jitter,
+			&result.TotalSamples,
+			&result.ValidSamples,
+			&result.OutlierCount,
+			&result.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan aggregated result: %w", err)
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// GetAllAggregatedSyncResults retrieves all aggregated results
+func (r *SQLiteRepository) GetAllAggregatedSyncResults(limit, offset int) ([]*models.AggregatedSyncResult, error) {
+	query := `
+	SELECT aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
+	       offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+	       total_samples, valid_samples, outlier_count, created_at
+	FROM aggregated_sync_results
+	ORDER BY created_at DESC
+	LIMIT ? OFFSET ?
+	`
+
+	rows, err := r.db.Query(query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all aggregated results: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*models.AggregatedSyncResult
+	for rows.Next() {
+		result := &models.AggregatedSyncResult{}
+		err := rows.Scan(
+			&result.AggregationID,
+			&result.PairingID,
+			&result.BestOffset,
+			&result.MedianOffset,
+			&result.MeanOffset,
+			&result.OffsetStdDev,
+			&result.MinRTT,
+			&result.MaxRTT,
+			&result.MeanRTT,
+			&result.Confidence,
+			&result.Jitter,
+			&result.TotalSamples,
+			&result.ValidSamples,
+			&result.OutlierCount,
+			&result.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan aggregated result: %w", err)
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// GetAggregatedSyncResultsByTimeRange retrieves aggregated results within a time range
+func (r *SQLiteRepository) GetAggregatedSyncResultsByTimeRange(startTime, endTime time.Time, limit, offset int) ([]*models.AggregatedSyncResult, error) {
+	query := `
+	SELECT aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
+	       offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+	       total_samples, valid_samples, outlier_count, created_at
+	FROM aggregated_sync_results
+	WHERE created_at BETWEEN ? AND ?
+	ORDER BY created_at DESC
+	LIMIT ? OFFSET ?
+	`
+
+	startMillis := startTime.UnixMilli()
+	endMillis := endTime.UnixMilli()
+
+	rows, err := r.db.Query(query, startMillis, endMillis, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query aggregated results by time range: %w", err)
 	}
 	defer rows.Close()
 
