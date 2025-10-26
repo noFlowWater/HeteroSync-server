@@ -21,7 +21,7 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Application-level PING period (20 seconds as recommended)
-	appPingPeriod = 20 * time.Second
+	appPingPeriod = 40 * time.Second
 
 	// Maximum message size allowed from peer
 	maxMessageSize = 512 // Increased to 8KB to handle longer JSON messages
