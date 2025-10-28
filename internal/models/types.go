@@ -183,6 +183,11 @@ type SampleAnalysis struct {
 type CreatePairingRequest struct {
 	Device1ID string `json:"device1Id" binding:"required"`
 	Device2ID string `json:"device2Id" binding:"required"`
+
+	// Optional auto-sync configuration (uses server defaults if not provided)
+	AutoSyncIntervalSec *int `json:"autoSyncIntervalSec,omitempty"` // Optional: interval between syncs in seconds
+	AutoSyncSampleCount *int `json:"autoSyncSampleCount,omitempty"` // Optional: number of samples per sync
+	AutoSyncIntervalMs  *int `json:"autoSyncIntervalMs,omitempty"`  // Optional: interval between samples in ms
 }
 
 type CreatePairingResponse struct {
@@ -199,4 +204,49 @@ type MultiSyncResponse struct {
 	Success bool                  `json:"success"`
 	Result  *AggregatedSyncResult `json:"result,omitempty"`
 	Error   string                `json:"error,omitempty"`
+}
+
+// Auto-Sync Monitor Models
+
+// AutoSyncStatus represents the status of an auto-sync job
+type AutoSyncStatus string
+
+const (
+	AutoSyncStatusRunning AutoSyncStatus = "RUNNING"
+	AutoSyncStatusStopped AutoSyncStatus = "STOPPED"
+	AutoSyncStatusFailed  AutoSyncStatus = "FAILED"
+)
+
+// AutoSyncConfig represents configuration for auto-sync monitoring
+type AutoSyncConfig struct {
+	PairingID   string `json:"pairing_id" binding:"required"`
+	IntervalSec int    `json:"interval_sec"` // Interval between syncs in seconds, default: 60
+	SampleCount int    `json:"sample_count"` // Number of samples per sync, default: 8
+	IntervalMs  int    `json:"interval_ms"`  // Interval between samples in ms, default: 200
+}
+
+// AutoSyncJob represents a running auto-sync job
+type AutoSyncJob struct {
+	PairingID       string         `json:"pairing_id"`
+	Status          AutoSyncStatus `json:"status"`
+	Config          AutoSyncConfig `json:"config"`
+	StartedAt       time.Time      `json:"started_at"`
+	LastSyncAt      *time.Time     `json:"last_sync_at,omitempty"`
+	LastSyncSuccess bool           `json:"last_sync_success"`
+	LastError       string         `json:"last_error,omitempty"`
+	TotalSyncs      int            `json:"total_syncs"`
+	FailedSyncs     int            `json:"failed_syncs"`
+}
+
+// AutoSyncStartRequest represents a request to start auto-sync
+type AutoSyncStartRequest struct {
+	PairingID   string `json:"pairing_id" binding:"required"`
+	IntervalSec int    `json:"interval_sec"` // Default: 60
+	SampleCount int    `json:"sample_count"` // Default: 8
+	IntervalMs  int    `json:"interval_ms"`  // Default: 200
+}
+
+// AutoSyncStatusResponse represents the response for auto-sync status
+type AutoSyncStatusResponse struct {
+	Jobs []*AutoSyncJob `json:"jobs"`
 }

@@ -95,5 +95,30 @@ func SetupRoutes(r *gin.Engine, handler *Handler) {
 			// Output: {"aggregation_id": "agg-123", "measurements": [...], ...}
 			sync.GET("/aggregated/:aggregationId", handler.GetAggregatedResult)
 		}
+
+		// Auto-Sync management
+		autoSync := api.Group("/auto-sync")
+		{
+			// POST /api/auto-sync/start
+			// Start automatic periodic synchronization for a pairing
+			// Input: {"pairing_id": "pair-123", "interval_sec": 60, "sample_count": 8, "interval_ms": 200}
+			// Output: {"message": "auto-sync started", "pairing_id": "pair-123"}
+			autoSync.POST("/start", handler.StartAutoSync)
+
+			// POST /api/auto-sync/stop/:pairingId
+			// Stop automatic synchronization for a pairing
+			// Example: POST /api/auto-sync/stop/pair-123
+			// Output: {"message": "auto-sync stopped", "pairing_id": "pair-123"}
+			autoSync.POST("/stop/:pairingId", handler.StopAutoSync)
+
+			// GET /api/auto-sync/status
+			// Get status of all auto-sync jobs or specific pairing
+			// Query params: pairingId (optional)
+			// Examples:
+			//   - GET /api/auto-sync/status (all jobs)
+			//   - GET /api/auto-sync/status?pairingId=pair-123 (specific job)
+			// Output: {"jobs": [{"pairing_id": "pair-123", "status": "RUNNING", ...}]}
+			autoSync.GET("/status", handler.GetAutoSyncStatus)
+		}
 	}
 }

@@ -7,6 +7,7 @@
 - **WebSocket 연결 관리**: PSG PC와 갤럭시 워치가 WebSocket으로 서버에 연결
 - **PING/PONG 연결 모니터링**: 자동 연결 상태 확인 및 죽은 연결 감지
 - **디바이스 페어링**: 연결된 디바이스들을 페어링하여 시간 동기화 준비
+- **자동 동기화 모니터링**: 페어링 생성 시 자동으로 주기적 동기화 시작 (백그라운드 실행)
 - **시간 동기화**: 페어링된 두 디바이스에게 현재 시스템 시간을 요청하고 기록
 - **NTP 다중 샘플링**: NTP 알고리즘 기반 정밀 시간 동기화 (8-10회 측정 후 최적값 선택)
 - **동기화 이력 조회**: 저장된 시간 동기화 기록을 조회
@@ -48,7 +49,8 @@ time-sync-server/
 │   │   ├── ntp_selector.go        # NTP 선택 알고리즘
 │   │   └── ntp_selector_test.go   # 알고리즘 단위 테스트
 │   ├── service/
-│   │   └── sync_service.go        # 비즈니스 로직
+│   │   ├── sync_service.go        # 비즈니스 로직
+│   │   └── auto_sync_monitor.go   # 자동 동기화 모니터
 │   ├── repository/
 │   │   └── sqlite.go              # DB 접근 레이어
 │   └── models/
@@ -82,6 +84,9 @@ go build -o time-sync-server ./cmd/server
 
 # 환경변수로 설정 변경
 PORT=9000 DB_PATH=/path/to/database.db ./time-sync-server
+
+# Auto-Sync 기본값 설정
+AUTO_SYNC_INTERVAL_SEC=120 AUTO_SYNC_SAMPLE_COUNT=10 AUTO_SYNC_INTERVAL_MS=300 ./time-sync-server
 ```
 
 ### 개발 모드 실행
@@ -215,15 +220,38 @@ curl http://localhost:8080/api/devices/health | jq '.[] | select(.isHealthy == f
 ```
 
 #### 3. 페어링 생성
+
+페어링 생성 시 **자동으로 Auto-Sync가 시작**됩니다. Auto-Sync 설정은 선택적으로 지정 가능하며, 지정하지 않으면 서버의 기본값(환경변수)을 사용합니다.
+
 ```bash
 POST /api/pairings
 Content-Type: application/json
 
+# 기본값으로 페어링 생성 (Auto-Sync 자동 시작)
 {
   "device1Id": "psg-001",
   "device2Id": "watch-001"
 }
+
+# 커스텀 Auto-Sync 설정으로 페어링 생성
+{
+  "device1Id": "psg-002",
+  "device2Id": "watch-002",
+  "autoSyncIntervalSec": 120,
+  "autoSyncSampleCount": 10,
+  "autoSyncIntervalMs": 300
+}
 ```
+
+**요청 파라미터:**
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `device1Id` | string | ✅ | 첫 번째 디바이스 ID |
+| `device2Id` | string | ✅ | 두 번째 디바이스 ID |
+| `autoSyncIntervalSec` | int | ❌ | Auto-Sync 주기(초), 기본값: 환경변수 또는 600 |
+| `autoSyncSampleCount` | int | ❌ | 샘플링 횟수, 기본값: 환경변수 또는 15 |
+| `autoSyncIntervalMs` | int | ❌ | 샘플 간격(ms), 기본값: 환경변수 또는 200 |
 
 **응답 예시:**
 ```json
@@ -232,14 +260,27 @@ Content-Type: application/json
 }
 ```
 
+**서버 로그:**
+```
+Auto-sync automatically started for pairing 550e8400-e29b-41d4-a716-446655440000 (interval: 120s, samples: 10, interval_ms: 300ms)
+```
+
 #### 4. 페어링 목록 조회
 ```bash
 GET /api/pairings
 ```
 
 #### 5. 페어링 삭제
+
+페어링 삭제 시 **자동으로 실행 중인 Auto-Sync가 중지**됩니다.
+
 ```bash
 DELETE /api/pairings/{pairingId}
+```
+
+**서버 로그:**
+```
+Auto-sync stopped for pairing 550e8400-e29b-41d4-a716-446655440000
 ```
 
 #### 6. 시간 동기화 실행 (단일 측정)
@@ -409,6 +450,183 @@ GET /api/sync/records/{recordId}
   "status": "SUCCESS",
   "createdAt": 1727870401000
 }
+```
+
+#### 10. Auto-Sync 관리
+
+Auto-Sync는 페어링 생성 시 자동으로 시작되며, **시작 즉시 첫 동기화를 수행**한 후 설정된 주기마다 반복 실행됩니다. 수동으로 제어할 수도 있습니다.
+
+##### 10-1. Auto-Sync 수동 시작
+
+```bash
+POST /api/auto-sync/start
+Content-Type: application/json
+
+{
+  "pairing_id": "550e8400-e29b-41d4-a716-446655440000",
+  "interval_sec": 90,
+  "sample_count": 12,
+  "interval_ms": 250
+}
+```
+
+**요청 파라미터:**
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `pairing_id` | string | ✅ | 페어링 ID |
+| `interval_sec` | int | ❌ | 동기화 주기(초), 기본값: 600 |
+| `sample_count` | int | ❌ | NTP 샘플 수, 기본값: 15 |
+| `interval_ms` | int | ❌ | 샘플 간격(ms), 기본값: 200 |
+
+**응답 예시:**
+```json
+{
+  "message": "auto-sync started",
+  "pairing_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**에러 응답:**
+```json
+// 이미 실행 중인 경우
+{
+  "error": "auto-sync already running for pairing: 550e8400-e29b-41d4-a716-446655440000"
+}
+
+// 페어링이 존재하지 않는 경우
+{
+  "error": "pairing not found: invalid-pairing-id"
+}
+```
+
+##### 10-2. Auto-Sync 중지
+
+```bash
+POST /api/auto-sync/stop/{pairingId}
+```
+
+**예시:**
+```bash
+POST /api/auto-sync/stop/550e8400-e29b-41d4-a716-446655440000
+```
+
+**응답 예시:**
+```json
+{
+  "message": "auto-sync stopped",
+  "pairing_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**에러 응답:**
+```json
+{
+  "error": "auto-sync not running for pairing: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+##### 10-3. Auto-Sync 상태 조회
+
+```bash
+# 모든 Auto-Sync 작업 상태 조회
+GET /api/auto-sync/status
+
+# 특정 페어링의 Auto-Sync 상태 조회
+GET /api/auto-sync/status?pairingId=550e8400-e29b-41d4-a716-446655440000
+```
+
+**응답 예시 (전체 조회):**
+```json
+{
+  "jobs": [
+    {
+      "pairing_id": "550e8400-e29b-41d4-a716-446655440000",
+      "status": "RUNNING",
+      "config": {
+        "pairing_id": "550e8400-e29b-41d4-a716-446655440000",
+        "interval_sec": 600,
+        "sample_count": 15,
+        "interval_ms": 200
+      },
+      "started_at": "2025-10-28T10:00:00Z",
+      "last_sync_at": "2025-10-28T10:05:00Z",
+      "last_sync_success": true,
+      "last_error": "",
+      "total_syncs": 5,
+      "failed_syncs": 0
+    },
+    {
+      "pairing_id": "another-pairing-id",
+      "status": "RUNNING",
+      "config": {
+        "pairing_id": "another-pairing-id",
+        "interval_sec": 120,
+        "sample_count": 10,
+        "interval_ms": 300
+      },
+      "started_at": "2025-10-28T10:02:00Z",
+      "last_sync_at": "2025-10-28T10:04:00Z",
+      "last_sync_success": false,
+      "last_error": "timeout waiting for device response",
+      "total_syncs": 2,
+      "failed_syncs": 1
+    }
+  ]
+}
+```
+
+**응답 예시 (특정 페어링 조회):**
+```json
+{
+  "pairing_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "RUNNING",
+  "config": {
+    "pairing_id": "550e8400-e29b-41d4-a716-446655440000",
+    "interval_sec": 600,
+    "sample_count": 15,
+    "interval_ms": 200
+  },
+  "started_at": "2025-10-28T10:00:00Z",
+  "last_sync_at": "2025-10-28T10:05:00Z",
+  "last_sync_success": true,
+  "last_error": "",
+  "total_syncs": 5,
+  "failed_syncs": 0
+}
+```
+
+**응답 필드 설명:**
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `pairing_id` | string | 페어링 ID |
+| `status` | string | 작업 상태 (RUNNING, STOPPED, FAILED) |
+| `config` | object | Auto-Sync 설정 |
+| `started_at` | timestamp | Auto-Sync 시작 시간 (RFC3339) |
+| `last_sync_at` | timestamp | 마지막 동기화 시간 |
+| `last_sync_success` | boolean | 마지막 동기화 성공 여부 |
+| `last_error` | string | 마지막 에러 메시지 (있는 경우) |
+| `total_syncs` | int | 총 동기화 시도 횟수 |
+| `failed_syncs` | int | 실패한 동기화 횟수 |
+
+**사용 사례:**
+
+```bash
+# 1. 실시간 모니터링 (watch 명령어)
+watch -n 5 'curl -s http://localhost:8080/api/auto-sync/status | jq'
+
+# 2. 특정 페어링 상태 확인
+curl "http://localhost:8080/api/auto-sync/status?pairingId=pair-123" | jq
+
+# 3. 실패한 작업 필터링 (jq 사용)
+curl http://localhost:8080/api/auto-sync/status | jq '.jobs[] | select(.failed_syncs > 0)'
+
+# 4. 성공률 계산
+curl http://localhost:8080/api/auto-sync/status | jq '.jobs[] | {
+  pairing_id,
+  success_rate: ((.total_syncs - .failed_syncs) / .total_syncs * 100)
+}'
 ```
 
 ### WebSocket 연결
@@ -867,17 +1085,26 @@ Sample 2: Raw=-150ms, RTT1=20ms, RTT2=30ms  → Adjusted=-145ms
 2. **페어링 생성**
    - 관리자가 REST API로 두 디바이스를 페어링
    - 페어링 정보는 메모리에 저장 (휘발성)
+   - **자동으로 Auto-Sync 시작** (백그라운드 goroutine에서 주기적 동기화 실행)
 
-3. **시간 동기화 실행**
+3. **자동 시간 동기화 (Auto-Sync)**
+   - 페어링별 독립적인 백그라운드 작업으로 실행
+   - 시작 즉시 첫 동기화 수행, 이후 설정된 주기(기본 600초/10분)마다 반복 실행
+   - NTP 다중 샘플링으로 정밀 측정 (기본 15회)
+   - 동기화 결과는 자동으로 DB에 저장
+   - 상태 API로 실시간 모니터링 가능
+
+4. **수동 시간 동기화 (선택사항)**
    - **단일 측정**: REST API로 특정 페어링에 대해 1회 측정
-   - **NTP 다중 샘플링** (권장): 8-10회 측정 후 최적값 선택
+   - **NTP 다중 샘플링**: 8-10회 측정 후 최적값 선택
    - 서버가 WebSocket을 통해 두 디바이스에게 시간 요청
    - 각 디바이스가 현재 시스템 시간을 응답
    - 서버가 결과를 DB에 저장
 
-4. **이력 조회**
+5. **이력 조회**
    - REST API로 저장된 동기화 기록 조회
    - NTP 집계 결과 및 개별 측정값 조회
+   - Auto-Sync로 자동 수집된 데이터 포함
 
 ## 환경 변수
 
@@ -885,6 +1112,20 @@ Sample 2: Raw=-150ms, RTT1=20ms, RTT2=30ms  → Adjusted=-145ms
 |------|------|--------|
 | `PORT` | 서버 포트 | `8080` |
 | `DB_PATH` | SQLite DB 파일 경로 | `./time-sync.db` |
+| `AUTO_SYNC_INTERVAL_SEC` | Auto-Sync 기본 주기 (초) | `600` |
+| `AUTO_SYNC_SAMPLE_COUNT` | Auto-Sync 기본 샘플 수 | `15` |
+| `AUTO_SYNC_INTERVAL_MS` | Auto-Sync 샘플 간격 (ms) | `200` |
+
+**사용 예시:**
+```bash
+# Auto-Sync 기본값을 커스터마이즈하여 서버 시작
+AUTO_SYNC_INTERVAL_SEC=120 \
+AUTO_SYNC_SAMPLE_COUNT=10 \
+AUTO_SYNC_INTERVAL_MS=300 \
+./time-sync-server
+
+# 이후 페어링 생성 시 위 설정이 기본값으로 사용됨
+```
 
 ## 의존성
 

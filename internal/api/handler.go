@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"time-sync-server/config"
 	"time-sync-server/internal/models"
 	"time-sync-server/internal/service"
 	ws "time-sync-server/internal/websocket"
@@ -25,14 +26,18 @@ var upgrader = websocket.Upgrader{
 }
 
 type Handler struct {
-	syncService *service.SyncService
-	hub         *ws.Hub
+	syncService     *service.SyncService
+	autoSyncMonitor *service.AutoSyncMonitor
+	hub             *ws.Hub
+	config          *config.Config
 }
 
-func NewHandler(syncService *service.SyncService, hub *ws.Hub) *Handler {
+func NewHandler(syncService *service.SyncService, autoSyncMonitor *service.AutoSyncMonitor, hub *ws.Hub, cfg *config.Config) *Handler {
 	return &Handler{
-		syncService: syncService,
-		hub:         hub,
+		syncService:     syncService,
+		autoSyncMonitor: autoSyncMonitor,
+		hub:             hub,
+		config:          cfg,
 	}
 }
 
@@ -116,6 +121,38 @@ func (h *Handler) CreatePairing(c *gin.Context) {
 		return
 	}
 
+	// Use request values if provided, otherwise use config defaults
+	intervalSec := h.config.AutoSyncIntervalSec
+	if req.AutoSyncIntervalSec != nil {
+		intervalSec = *req.AutoSyncIntervalSec
+	}
+
+	sampleCount := h.config.AutoSyncSampleCount
+	if req.AutoSyncSampleCount != nil {
+		sampleCount = *req.AutoSyncSampleCount
+	}
+
+	intervalMs := h.config.AutoSyncIntervalMs
+	if req.AutoSyncIntervalMs != nil {
+		intervalMs = *req.AutoSyncIntervalMs
+	}
+
+	// Automatically start auto-sync with configuration
+	autoSyncConfig := models.AutoSyncConfig{
+		PairingID:   pairing.PairingID,
+		IntervalSec: intervalSec,
+		SampleCount: sampleCount,
+		IntervalMs:  intervalMs,
+	}
+
+	if err := h.autoSyncMonitor.StartAutoSync(autoSyncConfig); err != nil {
+		log.Printf("Warning: Failed to start auto-sync for pairing %s: %v", pairing.PairingID, err)
+		// Don't fail the pairing creation, just log the warning
+	} else {
+		log.Printf("Auto-sync automatically started for pairing %s (interval: %ds, samples: %d, interval_ms: %dms)",
+			pairing.PairingID, intervalSec, sampleCount, intervalMs)
+	}
+
 	c.JSON(http.StatusCreated, models.CreatePairingResponse{
 		PairingID: pairing.PairingID,
 	})
@@ -123,6 +160,14 @@ func (h *Handler) CreatePairing(c *gin.Context) {
 
 func (h *Handler) DeletePairing(c *gin.Context) {
 	pairingID := c.Param("pairingId")
+
+	// Stop auto-sync if running
+	if err := h.autoSyncMonitor.StopAutoSync(pairingID); err != nil {
+		log.Printf("Note: Auto-sync was not running for pairing %s", pairingID)
+		// Don't fail if auto-sync wasn't running
+	} else {
+		log.Printf("Auto-sync stopped for pairing %s", pairingID)
+	}
 
 	if err := h.syncService.DeletePairing(pairingID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -310,4 +355,68 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 		"status": "ok",
 		"time":   time.Now().Unix(),
 	})
+}
+
+// Auto-Sync Handlers
+
+// StartAutoSync starts automatic periodic synchronization for a pairing
+func (h *Handler) StartAutoSync(c *gin.Context) {
+	var req models.AutoSyncStartRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	config := models.AutoSyncConfig{
+		PairingID:   req.PairingID,
+		IntervalSec: req.IntervalSec,
+		SampleCount: req.SampleCount,
+		IntervalMs:  req.IntervalMs,
+	}
+
+	if err := h.autoSyncMonitor.StartAutoSync(config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "auto-sync started",
+		"pairing_id": req.PairingID,
+	})
+}
+
+// StopAutoSync stops automatic synchronization for a pairing
+func (h *Handler) StopAutoSync(c *gin.Context) {
+	pairingID := c.Param("pairingId")
+
+	if err := h.autoSyncMonitor.StopAutoSync(pairingID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "auto-sync stopped",
+		"pairing_id": pairingID,
+	})
+}
+
+// GetAutoSyncStatus returns the status of auto-sync jobs
+func (h *Handler) GetAutoSyncStatus(c *gin.Context) {
+	pairingID := c.Query("pairingId")
+
+	if pairingID != "" {
+		// Get status for specific pairing
+		job, err := h.autoSyncMonitor.GetStatus(pairingID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, job)
+	} else {
+		// Get status for all jobs
+		jobs := h.autoSyncMonitor.GetAllStatuses()
+		c.JSON(http.StatusOK, models.AutoSyncStatusResponse{
+			Jobs: jobs,
+		})
+	}
 }
