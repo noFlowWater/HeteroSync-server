@@ -7,7 +7,7 @@
 - **WebSocket 연결 관리**: PSG PC와 갤럭시 워치가 WebSocket으로 서버에 연결
 - **PING/PONG 연결 모니터링**: 자동 연결 상태 확인 및 죽은 연결 감지
 - **디바이스 페어링**: 연결된 디바이스들을 페어링하여 시간 동기화 준비
-- **페어링 영구 저장 및 자동 복구**: 페어링 정보를 DB에 저장하여 디바이스 재연결 시 자동 복구 ⭐
+- **페어링 영구 저장 및 자동 복구**: 페어링 정보를 DB에 저장하여 디바이스 재연결 시 자동 복구 
 - **자동 동기화 모니터링**: 페어링 생성 시 자동으로 주기적 동기화 시작 (백그라운드 실행)
 - **시간 동기화**: 페어링된 두 디바이스에게 현재 시스템 시간을 요청하고 기록
 - **NTP 다중 샘플링**: NTP 알고리즘 기반 정밀 시간 동기화 (8-10회 측정 후 최적값 선택)
@@ -52,7 +52,7 @@ time-sync-server/
 │   ├── service/
 │   │   ├── sync_service.go        # 비즈니스 로직
 │   │   ├── auto_sync_monitor.go   # 자동 동기화 모니터
-│   │   └── pairing_operator.go    # 페어링 자동 복구 모니터 ⭐
+│   │   └── pairing_operator.go    # 페어링 자동 복구 모니터 
 │   ├── repository/
 │   │   └── sqlite.go              # DB 접근 레이어 (페어링 persistence 포함)
 │   └── models/
@@ -224,7 +224,7 @@ curl http://localhost:8080/api/devices/health | jq '.[] | select(.isHealthy == f
 #### 3. 페어링 생성
 
 페어링 생성 시 다음 작업이 자동으로 수행됩니다:
-- **페어링 정보가 DB에 영구 저장** (디바이스 재연결 시 자동 복구 가능) ⭐
+- **페어링 정보가 DB에 영구 저장** (디바이스 재연결 시 자동 복구 가능) 
 - **Auto-Sync가 자동으로 시작** (백그라운드 실행)
 
 Auto-Sync 설정은 선택적으로 지정 가능하며, 지정하지 않으면 서버의 기본값(환경변수)을 사용합니다.
@@ -273,7 +273,7 @@ Auto-sync automatically started for pairing 550e8400-e29b-41d4-a716-446655440000
 
 #### 4. 페어링 목록 조회
 
-**DB에 저장된 모든 페어링**을 조회합니다 (in-memory가 아닌 영구 저장소 조회). ⭐
+**DB에 저장된 모든 페어링**을 조회합니다 (in-memory가 아닌 영구 저장소 조회). 
 
 ```bash
 GET /api/pairings
@@ -288,7 +288,7 @@ GET /api/pairings
 페어링 삭제 시 다음 작업이 자동으로 수행됩니다:
 - **Auto-Sync 중지**
 - **in-memory에서 삭제**
-- **DB에서 영구 삭제** ⭐ (재연결 시 복구되지 않음)
+- **DB에서 영구 삭제**  (재연결 시 복구되지 않음)
 
 ```bash
 DELETE /api/pairings/{pairingId}
@@ -1098,15 +1098,15 @@ Sample 2: Raw=-150ms, RTT1=20ms, RTT2=30ms  → Adjusted=-145ms
 1. **디바이스 연결**
    - PSG PC와 갤럭시 워치가 각각 WebSocket으로 서버에 연결
    - Query parameter로 deviceId와 deviceType 전달
-   - **Pairing Operator가 디바이스 연결 감지** ⭐
+   - **Pairing Operator가 디바이스 연결 감지** 
 
-2. **페어링 생성 및 영구 저장** ⭐
+2. **페어링 생성 및 영구 저장** 
    - 관리자가 REST API로 두 디바이스를 페어링
    - **페어링 정보를 DB에 영구 저장** (디바이스 ID 조합, Auto-Sync 설정 포함)
    - 동시에 in-memory에도 등록 (빠른 접근)
    - **자동으로 Auto-Sync 시작** (백그라운드 goroutine에서 주기적 동기화 실행)
 
-3. **디바이스 재연결 시 자동 복구** ⭐
+3. **디바이스 재연결 시 자동 복구** 
    - 디바이스가 재연결되면 **Pairing Operator가 자동으로 동작**
    - DB에서 해당 디바이스의 모든 페어링 조회
    - 상대 디바이스도 연결되어 있으면 **페어링 자동 복구**
@@ -1208,7 +1208,7 @@ AUTO_SYNC_INTERVAL_MS=300 \
 
 **권장**: EDF 후처리에는 `best_offset` 값을 사용하세요. 이 값은 NTP 알고리즘이 선택한 가장 신뢰할 수 있는 오프셋입니다.
 
-### `pairings` (페어링 영구 저장) ⭐
+### `pairings` (페어링 영구 저장) 
 디바이스 페어링 정보와 Auto-Sync 설정을 영구 저장합니다.
 
 | 컬럼 | 타입 | 설명 |
@@ -1236,7 +1236,7 @@ AUTO_SYNC_INTERVAL_MS=300 \
 
 ## 사용 시나리오
 
-### 시나리오 1: 디바이스 재연결 자동 복구 ⭐
+### 시나리오 1: 디바이스 재연결 자동 복구 
 
 장기간 수면 측정 중 네트워크 연결이 일시적으로 끊어졌다가 재연결되는 경우:
 
@@ -1257,7 +1257,7 @@ curl -X POST http://localhost:8080/api/pairings \
 # 2. 디바이스 연결 해제 (예: 네트워크 끊김)
 # - in-memory 페어링 삭제
 # - Auto-Sync 중단
-# - ⭐ DB의 페어링은 그대로 유지
+# -  DB의 페어링은 그대로 유지
 
 # 3. 디바이스 재연결 (WebSocket 재연결)
 # 서버가 자동으로 감지하여:
