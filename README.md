@@ -19,12 +19,12 @@
 ```
 ┌─────────────┐         WebSocket         ┌──────────────┐
 │  PSG PC     │◄─────────────────────────►│              │
-└─────────────┘                            │              │
-                                           │  Time Sync   │
+└─────────────┘                           │              │
+                                          │  Time Sync   │
 ┌─────────────┐         WebSocket         │    Server    │
 │ Galaxy Watch│◄─────────────────────────►│              │
-└─────────────┘                            │              │
-                                           └──────────────┘
+└─────────────┘                           │              │
+                                          └──────────────┘
                                                   │
                                                   ▼
                                             ┌──────────┐
@@ -54,9 +54,9 @@ time-sync-server/
 │   │   ├── auto_sync_monitor.go   # 자동 동기화 모니터
 │   │   └── pairing_operator.go    # 페어링 자동 복구 모니터 
 │   ├── repository/
-│   │   └── sqlite.go              # DB 접근 레이어 (페어링 persistence 포함)
+│   │   └── sqlite.go              # DB 접근 레이어
 │   └── models/
-│       ├── types.go               # 데이터 모델 (PersistentPairing 포함)
+│       ├── types.go               # 데이터 모델
 │       ├── measurement.go         # 측정값 처리
 │       └── measurement_test.go    # 측정값 테스트
 ├── config/
