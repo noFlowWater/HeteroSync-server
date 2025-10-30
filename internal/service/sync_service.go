@@ -12,6 +12,18 @@ import (
 	"time-sync-server/internal/websocket"
 )
 
+// Repository interface for database operations
+type Repository interface {
+	SavePairing(pairing *models.PersistentPairing) error
+	GetPairingByID(pairingID string) (*models.PersistentPairing, error)
+	GetPairingsByDeviceID(deviceID string) ([]*models.PersistentPairing, error)
+	GetPairingByDevices(device1ID, device2ID string) (*models.PersistentPairing, error)
+	DeletePairing(pairingID string) error
+	GetAllPairings() ([]*models.PersistentPairing, error)
+	SaveTimeSyncRecord(record *models.TimeSyncRecord) error
+	SaveAggregatedSyncResult(result *models.AggregatedSyncResult) error
+}
+
 type SyncService struct {
 	hub  *websocket.Hub
 	repo *repository.SQLiteRepository

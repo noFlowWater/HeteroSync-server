@@ -39,12 +39,25 @@ type DeviceHealth struct {
 	TimeSinceLastPong int64   `json:"timeSinceLastPong"` // milliseconds
 }
 
-// Pairing represents a pairing between two devices
+// Pairing represents a pairing between two devices (in-memory)
 type Pairing struct {
 	PairingID string    `json:"pairingId"`
 	Device1ID string    `json:"device1Id"`
 	Device2ID string    `json:"device2Id"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// PersistentPairing represents a pairing stored in the database (includes Auto-Sync config)
+type PersistentPairing struct {
+	PairingID string    `json:"pairingId"`
+	Device1ID string    `json:"device1Id"`
+	Device2ID string    `json:"device2Id"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Auto-Sync configuration (nullable)
+	AutoSyncIntervalSec *int `json:"autoSyncIntervalSec,omitempty"`
+	AutoSyncSampleCount *int `json:"autoSyncSampleCount,omitempty"`
+	AutoSyncIntervalMs  *int `json:"autoSyncIntervalMs,omitempty"`
 }
 
 // TimeSyncRecord represents a time synchronization record

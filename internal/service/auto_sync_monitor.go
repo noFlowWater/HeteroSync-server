@@ -242,3 +242,19 @@ func (m *AutoSyncMonitor) performSync(jobCtx *autoSyncJobContext) {
 			pairingID, result.BestOffset, result.Confidence)
 	}
 }
+
+// IsRunning checks if an auto-sync job is currently running for a pairing
+func (m *AutoSyncMonitor) IsRunning(pairingID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	jobCtx, exists := m.jobs[pairingID]
+	if !exists {
+		return false
+	}
+
+	jobCtx.mu.RLock()
+	defer jobCtx.mu.RUnlock()
+
+	return jobCtx.job.Status == models.AutoSyncStatusRunning
+}

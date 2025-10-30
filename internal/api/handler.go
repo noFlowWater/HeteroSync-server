@@ -30,14 +30,16 @@ type Handler struct {
 	autoSyncMonitor *service.AutoSyncMonitor
 	hub             *ws.Hub
 	config          *config.Config
+	repository      service.Repository
 }
 
-func NewHandler(syncService *service.SyncService, autoSyncMonitor *service.AutoSyncMonitor, hub *ws.Hub, cfg *config.Config) *Handler {
+func NewHandler(syncService *service.SyncService, autoSyncMonitor *service.AutoSyncMonitor, hub *ws.Hub, cfg *config.Config, repo service.Repository) *Handler {
 	return &Handler{
 		syncService:     syncService,
 		autoSyncMonitor: autoSyncMonitor,
 		hub:             hub,
 		config:          cfg,
+		repository:      repo,
 	}
 }
 
@@ -104,7 +106,24 @@ func (h *Handler) GetDeviceHealth(c *gin.Context) {
 
 // Pairing Handlers
 func (h *Handler) GetPairings(c *gin.Context) {
-	pairings := h.syncService.GetPairings()
+	// Query pairings from database (persistent storage)
+	persistentPairings, err := h.repository.GetAllPairings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Convert PersistentPairing to Pairing for response
+	pairings := make([]*models.Pairing, 0, len(persistentPairings))
+	for _, pp := range persistentPairings {
+		pairings = append(pairings, &models.Pairing{
+			PairingID: pp.PairingID,
+			Device1ID: pp.Device1ID,
+			Device2ID: pp.Device2ID,
+			CreatedAt: pp.CreatedAt,
+		})
+	}
+
 	c.JSON(http.StatusOK, pairings)
 }
 
@@ -115,6 +134,7 @@ func (h *Handler) CreatePairing(c *gin.Context) {
 		return
 	}
 
+	// 1. Create in-memory pairing in Hub
 	pairing, err := h.syncService.CreatePairing(req.Device1ID, req.Device2ID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -137,7 +157,23 @@ func (h *Handler) CreatePairing(c *gin.Context) {
 		intervalMs = *req.AutoSyncIntervalMs
 	}
 
-	// Automatically start auto-sync with configuration
+	// 2. Save pairing to database for persistence
+	persistentPairing := &models.PersistentPairing{
+		PairingID:           pairing.PairingID,
+		Device1ID:           pairing.Device1ID,
+		Device2ID:           pairing.Device2ID,
+		CreatedAt:           pairing.CreatedAt,
+		AutoSyncIntervalSec: &intervalSec,
+		AutoSyncSampleCount: &sampleCount,
+		AutoSyncIntervalMs:  &intervalMs,
+	}
+
+	if err := h.repository.SavePairing(persistentPairing); err != nil {
+		log.Printf("Failed to save pairing to DB: %v", err)
+		// Don't fail the request, in-memory pairing is already created
+	}
+
+	// 3. Automatically start auto-sync with configuration
 	autoSyncConfig := models.AutoSyncConfig{
 		PairingID:   pairing.PairingID,
 		IntervalSec: intervalSec,
@@ -161,7 +197,7 @@ func (h *Handler) CreatePairing(c *gin.Context) {
 func (h *Handler) DeletePairing(c *gin.Context) {
 	pairingID := c.Param("pairingId")
 
-	// Stop auto-sync if running
+	// 1. Stop auto-sync if running
 	if err := h.autoSyncMonitor.StopAutoSync(pairingID); err != nil {
 		log.Printf("Note: Auto-sync was not running for pairing %s", pairingID)
 		// Don't fail if auto-sync wasn't running
@@ -169,9 +205,16 @@ func (h *Handler) DeletePairing(c *gin.Context) {
 		log.Printf("Auto-sync stopped for pairing %s", pairingID)
 	}
 
+	// 2. Delete from in-memory Hub
 	if err := h.syncService.DeletePairing(pairingID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 3. Delete from database
+	if err := h.repository.DeletePairing(pairingID); err != nil {
+		log.Printf("Failed to delete pairing from DB: %v", err)
+		// Don't fail the request, in-memory pairing is already deleted
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "pairing deleted"})

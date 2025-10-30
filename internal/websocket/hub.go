@@ -26,7 +26,15 @@ type Hub struct {
 	// Unregister requests from clients
 	Unregister chan *Client
 
+	// Pairing operator (set after initialization to avoid circular dependency)
+	pairingOperator PairingOperator
+
 	mu sync.RWMutex
+}
+
+// PairingOperator interface to avoid circular dependency
+type PairingOperator interface {
+	OnDeviceConnected(deviceID string)
 }
 
 type PendingRequest struct {
@@ -75,6 +83,11 @@ func (h *Hub) Run() {
 				ServerTime: time.Now().UnixMilli(),
 			}
 			client.SendMessage(msg)
+
+			// Trigger pairing restoration (run in goroutine to avoid blocking)
+			if h.pairingOperator != nil {
+				go h.pairingOperator.OnDeviceConnected(client.DeviceID)
+			}
 
 		case client := <-h.Unregister:
 			h.mu.Lock()
@@ -525,6 +538,49 @@ func (h *Hub) handlePong(client *Client, pong *models.PongMessage) {
 	}
 
 	// log.Printf("Received PONG from client %s, RTT: %dms", client.DeviceID, rtt)
+}
+
+// SetPairingOperator sets the pairing operator (called after initialization to avoid circular dependency)
+func (h *Hub) SetPairingOperator(operator PairingOperator) {
+	h.pairingOperator = operator
+}
+
+// IsDeviceConnected checks if a device is currently connected
+func (h *Hub) IsDeviceConnected(deviceID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	_, ok := h.Clients[deviceID]
+	return ok
+}
+
+// IsPairingRestored checks if a pairing is already restored in memory
+func (h *Hub) IsPairingRestored(pairingID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	_, ok := h.Pairings[pairingID]
+	return ok
+}
+
+// RestorePairing restores a pairing from DB to in-memory
+func (h *Hub) RestorePairing(pairing *models.Pairing) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Check if already exists
+	if _, ok := h.Pairings[pairing.PairingID]; ok {
+		return nil // Already restored, no error
+	}
+
+	// Check if both devices are connected
+	if _, ok := h.Clients[pairing.Device1ID]; !ok {
+		return &DeviceNotConnectedError{DeviceID: pairing.Device1ID}
+	}
+	if _, ok := h.Clients[pairing.Device2ID]; !ok {
+		return &DeviceNotConnectedError{DeviceID: pairing.Device2ID}
+	}
+
+	h.Pairings[pairing.PairingID] = pairing
+	return nil
 }
 
 // Custom errors

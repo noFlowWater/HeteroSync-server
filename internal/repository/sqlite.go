@@ -85,6 +85,20 @@ func (r *SQLiteRepository) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_agg_meas_agg ON aggregation_measurements(aggregation_id);
 	CREATE INDEX IF NOT EXISTS idx_agg_meas_meas ON aggregation_measurements(measurement_id);
+
+	CREATE TABLE IF NOT EXISTS pairings (
+		pairing_id TEXT PRIMARY KEY,
+		device1_id TEXT NOT NULL,
+		device2_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		auto_sync_interval_sec INTEGER,
+		auto_sync_sample_count INTEGER,
+		auto_sync_interval_ms INTEGER
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_pairing_device1 ON pairings(device1_id);
+	CREATE INDEX IF NOT EXISTS idx_pairing_device2 ON pairings(device2_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_pairing_devices ON pairings(device1_id, device2_id);
 	`
 
 	_, err := r.db.Exec(schema)
@@ -609,6 +623,201 @@ func (r *SQLiteRepository) getAggregationMeasurements(aggregationID string) ([]*
 	}
 
 	return records, nil
+}
+
+// SavePairing saves a pairing to the database
+func (r *SQLiteRepository) SavePairing(pairing *models.PersistentPairing) error {
+	query := `
+	INSERT INTO pairings (
+		pairing_id, device1_id, device2_id, created_at,
+		auto_sync_interval_sec, auto_sync_sample_count, auto_sync_interval_ms
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := r.db.Exec(query,
+		pairing.PairingID,
+		pairing.Device1ID,
+		pairing.Device2ID,
+		pairing.CreatedAt.UnixMilli(),
+		pairing.AutoSyncIntervalSec,
+		pairing.AutoSyncSampleCount,
+		pairing.AutoSyncIntervalMs,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to save pairing: %w", err)
+	}
+
+	return nil
+}
+
+// GetPairingByID retrieves a pairing by its ID
+func (r *SQLiteRepository) GetPairingByID(pairingID string) (*models.PersistentPairing, error) {
+	query := `
+	SELECT pairing_id, device1_id, device2_id, created_at,
+	       auto_sync_interval_sec, auto_sync_sample_count, auto_sync_interval_ms
+	FROM pairings
+	WHERE pairing_id = ?
+	`
+
+	pairing := &models.PersistentPairing{}
+	var createdAtMillis int64
+
+	err := r.db.QueryRow(query, pairingID).Scan(
+		&pairing.PairingID,
+		&pairing.Device1ID,
+		&pairing.Device2ID,
+		&createdAtMillis,
+		&pairing.AutoSyncIntervalSec,
+		&pairing.AutoSyncSampleCount,
+		&pairing.AutoSyncIntervalMs,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("pairing not found: %s", pairingID)
+		}
+		return nil, fmt.Errorf("failed to query pairing: %w", err)
+	}
+
+	pairing.CreatedAt = time.UnixMilli(createdAtMillis)
+	return pairing, nil
+}
+
+// GetPairingsByDeviceID retrieves all pairings that include the specified device
+func (r *SQLiteRepository) GetPairingsByDeviceID(deviceID string) ([]*models.PersistentPairing, error) {
+	query := `
+	SELECT pairing_id, device1_id, device2_id, created_at,
+	       auto_sync_interval_sec, auto_sync_sample_count, auto_sync_interval_ms
+	FROM pairings
+	WHERE device1_id = ? OR device2_id = ?
+	ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.Query(query, deviceID, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pairings by device: %w", err)
+	}
+	defer rows.Close()
+
+	var pairings []*models.PersistentPairing
+	for rows.Next() {
+		pairing := &models.PersistentPairing{}
+		var createdAtMillis int64
+
+		err := rows.Scan(
+			&pairing.PairingID,
+			&pairing.Device1ID,
+			&pairing.Device2ID,
+			&createdAtMillis,
+			&pairing.AutoSyncIntervalSec,
+			&pairing.AutoSyncSampleCount,
+			&pairing.AutoSyncIntervalMs,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan pairing: %w", err)
+		}
+
+		pairing.CreatedAt = time.UnixMilli(createdAtMillis)
+		pairings = append(pairings, pairing)
+	}
+
+	return pairings, nil
+}
+
+// GetPairingByDevices retrieves a pairing by device IDs (bidirectional check)
+func (r *SQLiteRepository) GetPairingByDevices(device1ID, device2ID string) (*models.PersistentPairing, error) {
+	query := `
+	SELECT pairing_id, device1_id, device2_id, created_at,
+	       auto_sync_interval_sec, auto_sync_sample_count, auto_sync_interval_ms
+	FROM pairings
+	WHERE (device1_id = ? AND device2_id = ?) OR (device1_id = ? AND device2_id = ?)
+	LIMIT 1
+	`
+
+	pairing := &models.PersistentPairing{}
+	var createdAtMillis int64
+
+	err := r.db.QueryRow(query, device1ID, device2ID, device2ID, device1ID).Scan(
+		&pairing.PairingID,
+		&pairing.Device1ID,
+		&pairing.Device2ID,
+		&createdAtMillis,
+		&pairing.AutoSyncIntervalSec,
+		&pairing.AutoSyncSampleCount,
+		&pairing.AutoSyncIntervalMs,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("pairing not found for devices: %s, %s", device1ID, device2ID)
+		}
+		return nil, fmt.Errorf("failed to query pairing by devices: %w", err)
+	}
+
+	pairing.CreatedAt = time.UnixMilli(createdAtMillis)
+	return pairing, nil
+}
+
+// DeletePairing deletes a pairing from the database
+func (r *SQLiteRepository) DeletePairing(pairingID string) error {
+	query := `DELETE FROM pairings WHERE pairing_id = ?`
+
+	result, err := r.db.Exec(query, pairingID)
+	if err != nil {
+		return fmt.Errorf("failed to delete pairing: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("pairing not found: %s", pairingID)
+	}
+
+	return nil
+}
+
+// GetAllPairings retrieves all pairings from the database
+func (r *SQLiteRepository) GetAllPairings() ([]*models.PersistentPairing, error) {
+	query := `
+	SELECT pairing_id, device1_id, device2_id, created_at,
+	       auto_sync_interval_sec, auto_sync_sample_count, auto_sync_interval_ms
+	FROM pairings
+	ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all pairings: %w", err)
+	}
+	defer rows.Close()
+
+	var pairings []*models.PersistentPairing
+	for rows.Next() {
+		pairing := &models.PersistentPairing{}
+		var createdAtMillis int64
+
+		err := rows.Scan(
+			&pairing.PairingID,
+			&pairing.Device1ID,
+			&pairing.Device2ID,
+			&createdAtMillis,
+			&pairing.AutoSyncIntervalSec,
+			&pairing.AutoSyncSampleCount,
+			&pairing.AutoSyncIntervalMs,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan pairing: %w", err)
+		}
+
+		pairing.CreatedAt = time.UnixMilli(createdAtMillis)
+		pairings = append(pairings, pairing)
+	}
+
+	return pairings, nil
 }
 
 func (r *SQLiteRepository) Close() error {
