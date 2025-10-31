@@ -197,7 +197,14 @@ func (h *Handler) CreatePairing(c *gin.Context) {
 func (h *Handler) DeletePairing(c *gin.Context) {
 	pairingID := c.Param("pairingId")
 
-	// 1. Stop auto-sync if running
+	// 1. Check if pairing exists in DB (source of truth)
+	_, err := h.repository.GetPairingByID(pairingID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "pairing not found"})
+		return
+	}
+
+	// 2. Stop auto-sync if running
 	if err := h.autoSyncMonitor.StopAutoSync(pairingID); err != nil {
 		log.Printf("Note: Auto-sync was not running for pairing %s", pairingID)
 		// Don't fail if auto-sync wasn't running
@@ -205,18 +212,20 @@ func (h *Handler) DeletePairing(c *gin.Context) {
 		log.Printf("Auto-sync stopped for pairing %s", pairingID)
 	}
 
-	// 2. Delete from in-memory Hub
+	// 3. Delete from in-memory Hub (if exists, don't fail if not)
 	if err := h.syncService.DeletePairing(pairingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		log.Printf("Note: Pairing not in memory (devices may be disconnected): %s", pairingID)
+		// Don't fail - devices might be disconnected
+	}
+
+	// 4. Delete from database (source of truth)
+	if err := h.repository.DeletePairing(pairingID); err != nil {
+		log.Printf("Failed to delete pairing from DB: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete pairing from database"})
 		return
 	}
 
-	// 3. Delete from database
-	if err := h.repository.DeletePairing(pairingID); err != nil {
-		log.Printf("Failed to delete pairing from DB: %v", err)
-		// Don't fail the request, in-memory pairing is already deleted
-	}
-
+	log.Printf("Pairing deleted: %s", pairingID)
 	c.JSON(http.StatusOK, gin.H{"message": "pairing deleted"})
 }
 
