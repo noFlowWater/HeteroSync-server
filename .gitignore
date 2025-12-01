@@ -46,7 +46,6 @@ time-sync-server
 server
 /bin/
 /build/
-/cmd/server/server
 
 # Logs
 *.log
