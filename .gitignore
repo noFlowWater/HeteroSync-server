@@ -77,3 +77,4 @@ vendor/
 # Claude
 *.claude.json
 .claude/
+CLAUDE.md
