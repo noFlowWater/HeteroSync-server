@@ -38,20 +38,23 @@ type PairingOperator interface {
 }
 
 type PendingRequest struct {
-	RequestID          string
-	PairingID          string
-	Device1ID          string
-	Device2ID          string
-	Device1Response    *int64
-	Device2Response    *int64
-	ServerRequestTime  int64
-	// RTT measurement fields
-	Device1SendTime    int64  // Device1 request send time (microseconds)
-	Device2SendTime    int64  // Device2 request send time (microseconds)
-	Device1ReceiveTime *int64 // Device1 response receive time (microseconds)
-	Device2ReceiveTime *int64 // Device2 response receive time (microseconds)
-	ResponseChan       chan *models.TimeSyncRecord
-	TimeoutTimer       *time.Timer
+	RequestID string
+	PairingID string
+	Device1ID string
+	Device2ID string
+	// RTT measurement fields (microseconds)
+	Device1SendTime    int64  // Device1 request send time (T1 in μs)
+	Device2SendTime    int64  // Device2 request send time (T1 in μs)
+	Device1ReceiveTime *int64 // Device1 response receive time (T4 in μs)
+	Device2ReceiveTime *int64 // Device2 response receive time (T4 in μs)
+	// NTP timestamp fields (milliseconds)
+	Device1T2 *int64 // Device1 요청 수신 시각 (ms)
+	Device1T3 *int64 // Device1 응답 송신 시각 (ms)
+	Device2T2 *int64 // Device2 요청 수신 시각 (ms)
+	Device2T3 *int64 // Device2 응답 송신 시각 (ms)
+	// Response channel and timeout
+	ResponseChan chan *models.TimeSyncRecord
+	TimeoutTimer *time.Timer
 }
 
 func NewHub() *Hub {
@@ -281,17 +284,15 @@ func (h *Hub) RequestTimeSync(pairingID string, timeout time.Duration) (*models.
 	}
 
 	requestID := uuid.New().String()
-	serverRequestTime := time.Now().UnixMilli()
 
 	responseChan := make(chan *models.TimeSyncRecord, 1)
 
 	pendingReq := &PendingRequest{
-		RequestID:         requestID,
-		PairingID:         pairingID,
-		Device1ID:         pairing.Device1ID,
-		Device2ID:         pairing.Device2ID,
-		ServerRequestTime: serverRequestTime,
-		ResponseChan:      responseChan,
+		RequestID:    requestID,
+		PairingID:    pairingID,
+		Device1ID:    pairing.Device1ID,
+		Device2ID:    pairing.Device2ID,
+		ResponseChan: responseChan,
 	}
 
 	h.mu.Lock()
@@ -400,10 +401,12 @@ func (h *Hub) handleTimeResponse(client *Client, resp *models.TimeResponseMessag
 
 	// Store response based on device
 	if client.DeviceID == pendingReq.Device1ID {
-		pendingReq.Device1Response = &resp.Timestamp
+		pendingReq.Device1T2 = &resp.ReceiveTime
+		pendingReq.Device1T3 = &resp.SendTime
 		pendingReq.Device1ReceiveTime = &receiveTime
 	} else if client.DeviceID == pendingReq.Device2ID {
-		pendingReq.Device2Response = &resp.Timestamp
+		pendingReq.Device2T2 = &resp.ReceiveTime
+		pendingReq.Device2T3 = &resp.SendTime
 		pendingReq.Device2ReceiveTime = &receiveTime
 	} else {
 		log.Printf("Response from unexpected device: %s", client.DeviceID)
@@ -411,7 +414,7 @@ func (h *Hub) handleTimeResponse(client *Client, resp *models.TimeResponseMessag
 	}
 
 	// Check if we have both responses
-	if pendingReq.Device1Response != nil && pendingReq.Device2Response != nil {
+	if pendingReq.Device1T2 != nil && pendingReq.Device2T2 != nil {
 		h.completeSyncRequest(pendingReq)
 	}
 }
@@ -435,14 +438,12 @@ func (h *Hub) completeSyncRequest(pendingReq *PendingRequest) {
 		pendingReq.TimeoutTimer.Stop()
 	}
 
-	serverResponseTime := time.Now().UnixMilli()
-
 	// Determine status
 	var status models.SyncStatus
 	var errorMsg *string
-	if pendingReq.Device1Response != nil && pendingReq.Device2Response != nil {
+	if pendingReq.Device1T2 != nil && pendingReq.Device2T2 != nil {
 		status = models.SyncStatusSuccess
-	} else if pendingReq.Device1Response != nil || pendingReq.Device2Response != nil {
+	} else if pendingReq.Device1T2 != nil || pendingReq.Device2T2 != nil {
 		status = models.SyncStatusPartial
 		msg := "One or more devices did not respond"
 		errorMsg = &msg
@@ -461,43 +462,93 @@ func (h *Hub) completeSyncRequest(pendingReq *PendingRequest) {
 		device2Type = client2.DeviceType
 	}
 
-	// Calculate RTT for each device
-	var device1RTT, device2RTT *int64
-	if pendingReq.Device1ReceiveTime != nil && pendingReq.Device1SendTime > 0 {
+	// Calculate Device1 NTP values
+	var device1T1, device1T4 *int64
+	var device1RTT *int64
+	var device1Offset, device1Delay *int64
+	if pendingReq.Device1SendTime > 0 {
+		t1Ms := pendingReq.Device1SendTime / 1000 // Convert microseconds to milliseconds
+		device1T1 = &t1Ms
+	}
+	if pendingReq.Device1ReceiveTime != nil {
+		t4Ms := *pendingReq.Device1ReceiveTime / 1000 // Convert microseconds to milliseconds
+		device1T4 = &t4Ms
+		// Calculate RTT in microseconds
 		rtt := *pendingReq.Device1ReceiveTime - pendingReq.Device1SendTime
 		device1RTT = &rtt
 	}
-	if pendingReq.Device2ReceiveTime != nil && pendingReq.Device2SendTime > 0 {
+	// Calculate offset and delay if all timestamps are available
+	if device1T1 != nil && pendingReq.Device1T2 != nil && pendingReq.Device1T3 != nil && device1T4 != nil {
+		// offset = ((T2 - T1) + (T3 - T4)) / 2
+		offset := ((*pendingReq.Device1T2 - *device1T1) + (*pendingReq.Device1T3 - *device1T4)) / 2
+		device1Offset = &offset
+		// delay = (T4 - T1) - (T3 - T2)
+		delay := (*device1T4 - *device1T1) - (*pendingReq.Device1T3 - *pendingReq.Device1T2)
+		device1Delay = &delay
+	}
+
+	// Calculate Device2 NTP values
+	var device2T1, device2T4 *int64
+	var device2RTT *int64
+	var device2Offset, device2Delay *int64
+	if pendingReq.Device2SendTime > 0 {
+		t1Ms := pendingReq.Device2SendTime / 1000 // Convert microseconds to milliseconds
+		device2T1 = &t1Ms
+	}
+	if pendingReq.Device2ReceiveTime != nil {
+		t4Ms := *pendingReq.Device2ReceiveTime / 1000 // Convert microseconds to milliseconds
+		device2T4 = &t4Ms
+		// Calculate RTT in microseconds
 		rtt := *pendingReq.Device2ReceiveTime - pendingReq.Device2SendTime
 		device2RTT = &rtt
 	}
+	// Calculate offset and delay if all timestamps are available
+	if device2T1 != nil && pendingReq.Device2T2 != nil && pendingReq.Device2T3 != nil && device2T4 != nil {
+		// offset = ((T2 - T1) + (T3 - T4)) / 2
+		offset := ((*pendingReq.Device2T2 - *device2T1) + (*pendingReq.Device2T3 - *device2T4)) / 2
+		device2Offset = &offset
+		// delay = (T4 - T1) - (T3 - T2)
+		delay := (*device2T4 - *device2T1) - (*pendingReq.Device2T3 - *pendingReq.Device2T2)
+		device2Delay = &delay
+	}
 
-	// Calculate RAW time difference (no network compensation)
-	// Network delay compensation will be applied by NTPSelector during multi-sampling
+	// Calculate RAW time difference (Device1T2 - Device2T2)
+	// This represents the time difference between two devices based on their local clocks
 	var timeDifference *int64
-	if pendingReq.Device1Response != nil && pendingReq.Device2Response != nil {
-		// Store raw difference: Device1Time - Device2Time
-		// Negative = Device1 is behind Device2
-		// Positive = Device1 is ahead of Device2
-		rawDiff := *pendingReq.Device1Response - *pendingReq.Device2Response
+	if pendingReq.Device1T2 != nil && pendingReq.Device2T2 != nil {
+		rawDiff := *pendingReq.Device1T2 - *pendingReq.Device2T2
 		timeDifference = &rawDiff
 	}
 
 	record := &models.TimeSyncRecord{
-		Device1ID:          pendingReq.Device1ID,
-		Device1Type:        device1Type,
-		Device1Timestamp:   pendingReq.Device1Response,
-		Device2ID:          pendingReq.Device2ID,
-		Device2Type:        device2Type,
-		Device2Timestamp:   pendingReq.Device2Response,
-		ServerRequestTime:  pendingReq.ServerRequestTime,
-		ServerResponseTime: &serverResponseTime,
-		Device1RTT:         device1RTT,
-		Device2RTT:         device2RTT,
-		TimeDifference:     timeDifference,
-		Status:             status,
-		ErrorMessage:       errorMsg,
-		CreatedAt:          time.Now().UnixMilli(),
+		Device1ID:   pendingReq.Device1ID,
+		Device1Type: device1Type,
+		Device2ID:   pendingReq.Device2ID,
+		Device2Type: device2Type,
+		// Device1 NTP timestamps
+		Device1T1: device1T1,
+		Device1T2: pendingReq.Device1T2,
+		Device1T3: pendingReq.Device1T3,
+		Device1T4: device1T4,
+		// Device2 NTP timestamps
+		Device2T1: device2T1,
+		Device2T2: pendingReq.Device2T2,
+		Device2T3: pendingReq.Device2T3,
+		Device2T4: device2T4,
+		// Device1 calculated values
+		Device1Offset: device1Offset,
+		Device1Delay:  device1Delay,
+		Device1RTT:    device1RTT,
+		// Device2 calculated values
+		Device2Offset: device2Offset,
+		Device2Delay:  device2Delay,
+		Device2RTT:    device2RTT,
+		// Time difference
+		TimeDifference: timeDifference,
+		// Status and metadata
+		Status:       status,
+		ErrorMessage: errorMsg,
+		CreatedAt:    time.Now().UnixMilli(),
 	}
 
 	// Send result through channel

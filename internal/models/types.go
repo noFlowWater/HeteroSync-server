@@ -62,24 +62,41 @@ type PersistentPairing struct {
 
 // TimeSyncRecord represents a time synchronization record
 type TimeSyncRecord struct {
-	ID                 int64      `json:"id"`
-	Device1ID          string     `json:"device1Id"`
-	Device1Type        DeviceType `json:"device1Type"`
-	Device1Timestamp   *int64     `json:"device1Timestamp"` // Nullable for timeout, Milliseconds
-	Device2ID          string     `json:"device2Id"`
-	Device2Type        DeviceType `json:"device2Type"`
-	Device2Timestamp   *int64     `json:"device2Timestamp"` // Nullable for timeout, Milliseconds
-	ServerRequestTime  int64      `json:"serverRequestTime"` // Milliseconds
-	ServerResponseTime *int64     `json:"serverResponseTime"` // Nullable, Milliseconds
-	// RTT (Round-Trip Time) measurements in microseconds
-	Device1RTT         *int64     `json:"device1Rtt,omitempty"` // Device1 RTT (μs)
-	Device2RTT         *int64     `json:"device2Rtt,omitempty"` // Device2 RTT (μs)
+	ID          int64      `json:"id"`
+	Device1ID   string     `json:"device1Id"`
+	Device1Type DeviceType `json:"device1Type"`
+	Device2ID   string     `json:"device2Id"`
+	Device2Type DeviceType `json:"device2Type"`
+
+	// Device1 NTP timestamps (milliseconds)
+	Device1T1 *int64 `json:"device1T1,omitempty"` // Server → Device1 요청 송신 시각
+	Device1T2 *int64 `json:"device1T2,omitempty"` // Device1 요청 수신 시각
+	Device1T3 *int64 `json:"device1T3,omitempty"` // Device1 응답 송신 시각
+	Device1T4 *int64 `json:"device1T4,omitempty"` // Server ← Device1 응답 수신 시각
+
+	// Device2 NTP timestamps (milliseconds)
+	Device2T1 *int64 `json:"device2T1,omitempty"` // Server → Device2 요청 송신 시각
+	Device2T2 *int64 `json:"device2T2,omitempty"` // Device2 요청 수신 시각
+	Device2T3 *int64 `json:"device2T3,omitempty"` // Device2 응답 송신 시각
+	Device2T4 *int64 `json:"device2T4,omitempty"` // Server ← Device2 응답 수신 시각
+
+	// Device1 calculated values
+	Device1Offset *int64 `json:"device1Offset,omitempty"` // offset = ((T2-T1)+(T3-T4))/2 (ms)
+	Device1Delay  *int64 `json:"device1Delay,omitempty"`  // delay = (T4-T1)-(T3-T2) (ms)
+	Device1RTT    *int64 `json:"device1Rtt,omitempty"`    // RTT in microseconds (μs)
+
+	// Device2 calculated values
+	Device2Offset *int64 `json:"device2Offset,omitempty"` // offset = ((T2-T1)+(T3-T4))/2 (ms)
+	Device2Delay  *int64 `json:"device2Delay,omitempty"`  // delay = (T4-T1)-(T3-T2) (ms)
+	Device2RTT    *int64 `json:"device2Rtt,omitempty"`    // RTT in microseconds (μs)
+
 	// Time difference (RAW, no network compensation)
 	// Network delay compensation is applied by NTPSelector during multi-sampling
-	TimeDifference     *int64     `json:"timeDifference,omitempty"` // Raw time diff: Device1Time - Device2Time (ms)
-	Status             SyncStatus `json:"status"`
-	ErrorMessage       *string    `json:"errorMessage,omitempty"`
-	CreatedAt          int64      `json:"createdAt"` // Milliseconds
+	TimeDifference *int64 `json:"timeDifference,omitempty"` // Raw time diff: Device1Time - Device2Time (ms)
+
+	Status       SyncStatus `json:"status"`
+	ErrorMessage *string    `json:"errorMessage,omitempty"`
+	CreatedAt    int64      `json:"createdAt"` // Milliseconds
 }
 
 // WebSocket Message Types
@@ -112,9 +129,10 @@ type TimeRequestMessage struct {
 }
 
 type TimeResponseMessage struct {
-	Type      MessageType `json:"type"`
-	RequestID string      `json:"requestId"`
-	Timestamp int64       `json:"timestamp"`
+	Type        MessageType `json:"type"`
+	RequestID   string      `json:"requestId"`
+	ReceiveTime int64       `json:"receiveTime"` // T2: 요청 받은 시각 (ms)
+	SendTime    int64       `json:"sendTime"`    // T3: 응답 보낸 시각 (ms)
 }
 
 type ErrorMessage struct {

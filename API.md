@@ -394,12 +394,15 @@ ws://localhost:8080/ws?deviceType={PSG|PC}&deviceId={deviceId}
 ```json
 {
   "type": "TIME_RESPONSE",
-  "request_id": "req-001",
-  "server_send_time": 1733054400000,
-  "client_receive_time": 1733054400100,
-  "client_send_time": 1733054400200
+  "requestId": "req-001",
+  "receiveTime": 1733054400100,
+  "sendTime": 1733054400200
 }
 ```
+
+**필드 설명**:
+- `receiveTime`: 클라이언트가 TIME_REQUEST를 받은 시각 (밀리초, T2)
+- `sendTime`: 클라이언트가 TIME_RESPONSE를 보낸 시각 (밀리초, T3)
 
 #### ERROR
 서버 → 클라이언트 (에러 메시지)
@@ -423,16 +426,17 @@ ws://localhost:8080/ws?deviceType={PSG|PC}&deviceId={deviceId}
 ### Timestamps
 - **HTTP JSON**: RFC3339 형식 (`2025-12-01T10:30:00Z`)
 - **WebSocket**: Unix milliseconds (`1733054400000`)
-- **내부 계산**: Microseconds (RTT, offset)
+- **NTP 타임스탬프**: Milliseconds (T1-T4)
+- **RTT**: Microseconds (고정밀도 측정)
 
 ### Offset Values
-- **raw_offset_us**: 네트워크 보정 전 오프셋 (마이크로초)
-- **adjusted_offset_us**: 네트워크 지연 보정 후 오프셋 (마이크로초)
-- **median_offset_us**: 다중 샘플의 중앙값 오프셋 (마이크로초)
+- **deviceOffset**: NTP 계산된 클록 오프셋 (밀리초)
+- **timeDifference**: 두 디바이스 간 RAW 시간 차이 (밀리초, 보정 전)
 
 ### RTT (Round-Trip Time)
 - 단위: 마이크로초 (microseconds)
 - NTP 알고리즘에서 네트워크 지연 계산에 사용
+- Device1RTT, Device2RTT는 각 디바이스와 서버 간의 왕복 시간
 
 ### Confidence Score
 - 범위: 0.0 ~ 1.0
