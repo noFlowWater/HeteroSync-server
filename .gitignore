@@ -18,6 +18,7 @@ coverage.html
 go.work
 
 # Database files
+.data/
 *.db
 *.db-shm
 *.db-wal
