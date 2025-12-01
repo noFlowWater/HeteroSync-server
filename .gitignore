@@ -43,7 +43,6 @@ Thumbs.db
 
 # Build output
 time-sync-server
-server
 /bin/
 /build/
 
