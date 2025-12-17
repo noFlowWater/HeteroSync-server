@@ -170,7 +170,6 @@ type AggregatedSyncResult struct {
 	MeanRTT      float64 `json:"mean_rtt"`       // Mean RTT in microseconds
 
 	// Quality metrics
-	Confidence float64 `json:"confidence"` // Confidence score 0.0 ~ 1.0
 	Jitter     float64 `json:"jitter"`     // RTT variability in microseconds
 
 	// Measurement information

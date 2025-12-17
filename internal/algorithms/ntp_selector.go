@@ -189,9 +189,6 @@ func (s *NTPSelector) calculateStatistics(
 	// Calculate RTT statistics
 	minRTT, maxRTT, meanRTT, jitter := calculateRTTStats(validAnalyses)
 
-	// Calculate confidence score
-	confidence := calculateConfidence(validAnalyses, offsetStdDev, jitter)
-
 	return &models.AggregatedSyncResult{
 		BestOffset:   medianOffset,
 		MedianOffset: medianOffset,
@@ -200,7 +197,6 @@ func (s *NTPSelector) calculateStatistics(
 		MinRTT:       minRTT,
 		MaxRTT:       maxRTT,
 		MeanRTT:      meanRTT,
-		Confidence:   confidence,
 		Jitter:       jitter,
 		TotalSamples: len(allRecords),
 		ValidSamples: len(validAnalyses),
@@ -291,31 +287,6 @@ func calculateRTTStats(analyses []*models.SampleAnalysis) (minRTT, maxRTT int64,
 	jitter = math.Sqrt(variance)
 
 	return minRTT, maxRTT, meanRTT, jitter
-}
-
-// calculateConfidence calculates a confidence score (0.0 to 1.0)
-// Higher confidence means more reliable synchronization
-// Factors: low offset variance, low jitter, sufficient samples
-func calculateConfidence(analyses []*models.SampleAnalysis, offsetStdDev, jitter float64) float64 {
-	if len(analyses) == 0 {
-		return 0.0
-	}
-
-	// Factor 1: Sample count (more samples = higher confidence)
-	sampleFactor := math.Min(float64(len(analyses))/10.0, 1.0)
-
-	// Factor 2: Offset consistency (lower stddev = higher confidence)
-	// Assume good if stddev < 5ms, poor if > 20ms
-	offsetFactor := 1.0 - math.Min(offsetStdDev/20.0, 1.0)
-
-	// Factor 3: Network stability (lower jitter = higher confidence)
-	// Assume good if jitter < 1000μs, poor if > 10000μs
-	jitterFactor := 1.0 - math.Min(jitter/10000.0, 1.0)
-
-	// Weighted average
-	confidence := (sampleFactor*0.3 + offsetFactor*0.4 + jitterFactor*0.3)
-
-	return math.Max(0.0, math.Min(1.0, confidence))
 }
 
 // abs returns the absolute value of an int64

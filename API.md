@@ -285,7 +285,6 @@ NTP 다중 샘플링 동기화 (권장)
     "min_rtt": 5000,
     "max_rtt": 15000,
     "mean_rtt": 8500.0,
-    "confidence": 0.94,
     "jitter": 2000.0,
     "total_samples": 10,
     "valid_samples": 8,
@@ -297,7 +296,6 @@ NTP 다중 샘플링 동기화 (권장)
 
 **Response Fields**
 - `best_offset`: **최적 오프셋** (ms, 네트워크 보정 **적용됨**)
-- `confidence`: 신뢰도 점수 (0.0~1.0, 높을수록 신뢰도 높음)
 - `jitter`: 네트워크 변동성 (μs, 낮을수록 안정적)
 - `offset_std_dev`: 오프셋 표준편차 (ms)
 
@@ -419,7 +417,6 @@ GET /api/sync/aggregated?startTime=2025-12-01T00:00:00Z&endTime=2025-12-02T23:59
     "best_offset": -150,
     "median_offset": -150,
     "mean_offset": -151.2,
-    "confidence": 0.94,
     "created_at": 1727870401000
   }
 ]
@@ -722,13 +719,6 @@ RTT = (T4-T1) - (T3-T2)
 ### RTT (Round-Trip Time)
 - **단위**: microseconds (μs)
 - NTP 알고리즘에서 네트워크 지연 계산에 사용
-
-### Confidence Score
-- **범위**: 0.0 ~ 1.0
-- 0.9 이상: 매우 신뢰할 수 있음
-- 0.7 ~ 0.9: 신뢰 가능
-- 0.5 ~ 0.7: 주의 필요
-- 0.5 미만: 재측정 권장
 
 ---
 

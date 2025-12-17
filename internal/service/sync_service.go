@@ -181,8 +181,8 @@ func (s *SyncService) RequestMultipleTimeSyncs(req *models.MultiSyncRequest) (*m
 	result.PairingID = req.PairingID
 	result.CreatedAt = time.Now().UnixMilli()
 
-	log.Printf("NTP algorithm completed: best_offset=%dms, confidence=%.2f, valid=%d/%d",
-		result.BestOffset, result.Confidence, result.ValidSamples, result.TotalSamples)
+	log.Printf("NTP algorithm completed: best_offset=%dms, valid=%d/%d",
+		result.BestOffset, result.ValidSamples, result.TotalSamples)
 
 	// Save aggregated result to database
 	if err := s.repo.SaveAggregatedSyncResult(result); err != nil {

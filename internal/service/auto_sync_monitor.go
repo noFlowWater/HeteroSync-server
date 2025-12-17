@@ -238,8 +238,8 @@ func (m *AutoSyncMonitor) performSync(jobCtx *autoSyncJobContext) {
 	} else {
 		jobCtx.job.LastSyncSuccess = true
 		jobCtx.job.LastError = ""
-		log.Printf("Auto-sync succeeded for pairing %s: offset=%dms, confidence=%.2f",
-			pairingID, result.BestOffset, result.Confidence)
+		log.Printf("Auto-sync succeeded for pairing %s: offset=%dms",
+			pairingID, result.BestOffset)
 	}
 }
 

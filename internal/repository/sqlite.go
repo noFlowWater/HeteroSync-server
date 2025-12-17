@@ -73,7 +73,6 @@ func (r *SQLiteRepository) initSchema() error {
 		min_rtt INTEGER NOT NULL,
 		max_rtt INTEGER NOT NULL,
 		mean_rtt REAL NOT NULL,
-		confidence REAL NOT NULL,
 		jitter REAL NOT NULL,
 		total_samples INTEGER NOT NULL,
 		valid_samples INTEGER NOT NULL,
@@ -400,9 +399,9 @@ func (r *SQLiteRepository) SaveAggregatedSyncResult(result *models.AggregatedSyn
 	query := `
 	INSERT INTO aggregated_sync_results (
 		aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
-		offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+		offset_std_dev, min_rtt, max_rtt, mean_rtt, jitter,
 		total_samples, valid_samples, outlier_count, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err = tx.Exec(query,
@@ -415,7 +414,6 @@ func (r *SQLiteRepository) SaveAggregatedSyncResult(result *models.AggregatedSyn
 		result.MinRTT,
 		result.MaxRTT,
 		result.MeanRTT,
-		result.Confidence,
 		result.Jitter,
 		result.TotalSamples,
 		result.ValidSamples,
@@ -446,7 +444,7 @@ func (r *SQLiteRepository) SaveAggregatedSyncResult(result *models.AggregatedSyn
 func (r *SQLiteRepository) GetAggregatedSyncResult(aggregationID string) (*models.AggregatedSyncResult, error) {
 	query := `
 	SELECT aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
-	       offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+	       offset_std_dev, min_rtt, max_rtt, mean_rtt, jitter,
 	       total_samples, valid_samples, outlier_count, created_at
 	FROM aggregated_sync_results
 	WHERE aggregation_id = ?
@@ -463,7 +461,6 @@ func (r *SQLiteRepository) GetAggregatedSyncResult(aggregationID string) (*model
 		&result.MinRTT,
 		&result.MaxRTT,
 		&result.MeanRTT,
-		&result.Confidence,
 		&result.Jitter,
 		&result.TotalSamples,
 		&result.ValidSamples,
@@ -492,7 +489,7 @@ func (r *SQLiteRepository) GetAggregatedSyncResult(aggregationID string) (*model
 func (r *SQLiteRepository) GetAggregatedSyncResultsByPairing(pairingID string, limit, offset int) ([]*models.AggregatedSyncResult, error) {
 	query := `
 	SELECT aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
-	       offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+	       offset_std_dev, min_rtt, max_rtt, mean_rtt, jitter,
 	       total_samples, valid_samples, outlier_count, created_at
 	FROM aggregated_sync_results
 	WHERE pairing_id = ?
@@ -519,7 +516,6 @@ func (r *SQLiteRepository) GetAggregatedSyncResultsByPairing(pairingID string, l
 			&result.MinRTT,
 			&result.MaxRTT,
 			&result.MeanRTT,
-			&result.Confidence,
 			&result.Jitter,
 			&result.TotalSamples,
 			&result.ValidSamples,
@@ -539,7 +535,7 @@ func (r *SQLiteRepository) GetAggregatedSyncResultsByPairing(pairingID string, l
 func (r *SQLiteRepository) GetAllAggregatedSyncResults(limit, offset int) ([]*models.AggregatedSyncResult, error) {
 	query := `
 	SELECT aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
-	       offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+	       offset_std_dev, min_rtt, max_rtt, mean_rtt, jitter,
 	       total_samples, valid_samples, outlier_count, created_at
 	FROM aggregated_sync_results
 	ORDER BY created_at DESC
@@ -565,7 +561,6 @@ func (r *SQLiteRepository) GetAllAggregatedSyncResults(limit, offset int) ([]*mo
 			&result.MinRTT,
 			&result.MaxRTT,
 			&result.MeanRTT,
-			&result.Confidence,
 			&result.Jitter,
 			&result.TotalSamples,
 			&result.ValidSamples,
@@ -585,7 +580,7 @@ func (r *SQLiteRepository) GetAllAggregatedSyncResults(limit, offset int) ([]*mo
 func (r *SQLiteRepository) GetAggregatedSyncResultsByTimeRange(startTime, endTime time.Time, limit, offset int) ([]*models.AggregatedSyncResult, error) {
 	query := `
 	SELECT aggregation_id, pairing_id, best_offset, median_offset, mean_offset,
-	       offset_std_dev, min_rtt, max_rtt, mean_rtt, confidence, jitter,
+	       offset_std_dev, min_rtt, max_rtt, mean_rtt, jitter,
 	       total_samples, valid_samples, outlier_count, created_at
 	FROM aggregated_sync_results
 	WHERE created_at BETWEEN ? AND ?
@@ -615,7 +610,6 @@ func (r *SQLiteRepository) GetAggregatedSyncResultsByTimeRange(startTime, endTim
 			&result.MinRTT,
 			&result.MaxRTT,
 			&result.MeanRTT,
-			&result.Confidence,
 			&result.Jitter,
 			&result.TotalSamples,
 			&result.ValidSamples,

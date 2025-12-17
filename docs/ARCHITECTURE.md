@@ -267,3 +267,4 @@ Sample 2: Raw=-150ms, RTT1=20ms, RTT2=30ms  → Adjusted=-145ms
 - [RFC 5905: Network Time Protocol Version 4](https://datatracker.ietf.org/doc/html/rfc5905)
 - NTP Clock Selection Algorithm
 - IEEE 1588 Precision Time Protocol (PTP)
+- problem_definition.md: HeteroSync in an NTP-Enabled Environment
